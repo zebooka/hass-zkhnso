@@ -10,7 +10,7 @@
 [![Sponsor on Cloudtips](https://img.shields.io/badge/donate-cloudtips-FFDD2D.svg)](https://pay.cloudtips.ru/p/34ce579c)
 [![Русский язык](https://img.shields.io/badge/Russian%20language-ДА-red)](https://en.wikipedia.org/wiki/Alexander_Pushkin)
 
-<img src="https://github.com/zebooka/hacs-zkhnso/blob/master/custom_components/zkhnso/brand/logo@2x.png?raw=true" alt="ZKHNSO" width="128"/>
+<img src="https://github.com/zebooka/hass-zkhnso/blob/master/custom_components/zkhnso/brand/logo@2x.png?raw=true" alt="ZKHNSO" width="128"/>
 
 An integration for the ЖКХНСО.рф housing and utility service in Home Assistant. It provides meter and tariff information for Novosibirsk Oblast, Russian Federation.
 
@@ -18,7 +18,7 @@ An integration for the ЖКХНСО.рф housing and utility service in Home Ass
 
 ### HACS
 
-[![Open your Home Assistant instance and show the repository in the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=zebooka&repository=hacs-zkhnso&category=integration)
+[![Open your Home Assistant instance and show the repository in the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=zebooka&repository=hass-zkhnso&category=integration)
 
 1. Open **HACS** in Home Assistant and search for **ЖКХНСО** (or use the button above).
 2. Open **ЖКХНСО**, select **Download**, and confirm the action.
@@ -27,7 +27,7 @@ An integration for the ЖКХНСО.рф housing and utility service in Home Ass
 ### HACS: Custom repository
 
 1. In HACS, open **⋮ → Custom repositories**.
-2. Add `https://github.com/zebooka/hacs-zkhnso` with type **Integration**.
+2. Add `https://github.com/zebooka/hass-zkhnso` with type **Integration**.
 3. Find **ЖКХНСО** and install the integration.
 4. Restart Home Assistant.
 5. Add the integration in **Settings → Devices & services**.
@@ -159,7 +159,7 @@ template:
 
 ## Support
 
-Report bugs and suggestions through the [GitHub repository](https://github.com/zebooka/hacs-zkhnso).
+Report bugs and suggestions through the [GitHub repository](https://github.com/zebooka/hass-zkhnso).
 
 ## License
 
