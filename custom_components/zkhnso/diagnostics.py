@@ -7,9 +7,17 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.redact import async_redact_data
 
-from .const import CONF_PASSWORD, CONF_USERNAME
+from .const import CONF_ACCOUNT_ID, CONF_ADDRESS, CONF_PASSWORD, CONF_USERNAME
 
-TO_REDACT = {CONF_PASSWORD, CONF_USERNAME, "JSESSIONID", "FORM_TOKEN", "loginToken"}
+TO_REDACT = {
+    CONF_ACCOUNT_ID,
+    CONF_ADDRESS,
+    CONF_PASSWORD,
+    CONF_USERNAME,
+    "JSESSIONID",
+    "FORM_TOKEN",
+    "loginToken",
+}
 
 
 async def async_get_config_entry_diagnostics(
