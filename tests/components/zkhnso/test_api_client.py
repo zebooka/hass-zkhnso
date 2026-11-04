@@ -1,7 +1,58 @@
 """Tests for ZKHNSO data parsing."""
-from multidict import CIMultiDict
+import asyncio
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 
-from custom_components.zkhnso.api_client import ZKHAPIClient
+import aiohttp
+from multidict import CIMultiDict
+import pytest
+
+from custom_components.zkhnso.api_client import ZKHAPIClient, ZKHAPIConnectionError
+
+
+def _login_client(status=200, body="<html>Account</html>", error=None):
+    """Create a client with a controlled login response."""
+    client = ZKHAPIClient("user", "password")
+    client.jsessionid = "session"
+    client.form_token = "token"
+    response = SimpleNamespace(
+        status=status,
+        headers=CIMultiDict(),
+        url="https://example.test/login",
+        text=AsyncMock(return_value=body, side_effect=error),
+    )
+    request = MagicMock()
+    request.__aenter__ = AsyncMock(return_value=response)
+    request.__aexit__ = AsyncMock(return_value=None)
+    client.session = SimpleNamespace(post=MagicMock(return_value=request))
+    return client
+
+
+def test_login_distinguishes_accepted_and_rejected_credentials() -> None:
+    """Only the returned login form represents rejected credentials."""
+    assert asyncio.run(_login_client().login()) is True
+    assert asyncio.run(_login_client(body='<form id="loginForm"></form>').login()) is False
+
+
+@pytest.mark.parametrize("status", [401, 403, 429, 500, 503])
+def test_login_http_error_is_connection_error(status) -> None:
+    """HTTP errors are not interpreted as bad credentials, even with a login form."""
+    with pytest.raises(ZKHAPIConnectionError, match=f"HTTP status {status}"):
+        asyncio.run(_login_client(status=status, body='<form id="loginForm"></form>').login())
+
+
+@pytest.mark.parametrize("error", [TimeoutError(), aiohttp.ClientError(), ValueError()])
+def test_login_request_errors_are_connection_errors(error) -> None:
+    """Timeouts, client errors and unexpected errors remain connection failures."""
+    with pytest.raises(ZKHAPIConnectionError) as exc_info:
+        asyncio.run(_login_client(error=error).login())
+    assert exc_info.value.__cause__ is error
+
+
+def test_login_without_preflight_is_connection_error() -> None:
+    """A missing session is not a credentials rejection."""
+    with pytest.raises(ZKHAPIConnectionError):
+        asyncio.run(ZKHAPIClient("user", "password").login())
 
 
 def test_process_meters_preserves_fractional_reading() -> None:

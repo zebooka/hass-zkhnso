@@ -10,7 +10,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .api_client import ZKHAPIClient
+from .api_client import ZKHAPIClient, ZKHAPIConnectionError
 from .const import CONF_PASSWORD, CONF_USERNAME, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
@@ -37,7 +37,11 @@ class ZKHDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if not await client.preflight():
                 raise UpdateFailed("Failed to initialize ZKHNSO session")
 
-            if not await client.login():
+            try:
+                logged_in = await client.login()
+            except ZKHAPIConnectionError as err:
+                raise UpdateFailed("Failed to connect to ZKHNSO during login") from err
+            if not logged_in:
                 raise ConfigEntryAuthFailed("Invalid ZKHNSO credentials")
 
             meters = await client.get_meters()

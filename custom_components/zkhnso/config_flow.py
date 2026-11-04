@@ -11,7 +11,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.exceptions import HomeAssistantError
 
-from .api_client import ZKHAPIClient
+from .api_client import ZKHAPIClient, ZKHAPIConnectionError
 from .const import (
     CONF_ACCOUNT_ID,
     CONF_ADDRESS,
@@ -43,7 +43,11 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
     async with ZKHAPIClient(username, password) as client:
         if not await client.preflight():
             raise CannotConnect
-        if not await client.login():
+        try:
+            logged_in = await client.login()
+        except ZKHAPIConnectionError as err:
+            raise CannotConnect from err
+        if not logged_in:
             raise InvalidAuth
 
     if client.account_id is None or not client.address:

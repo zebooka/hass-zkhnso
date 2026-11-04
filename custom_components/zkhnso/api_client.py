@@ -25,6 +25,10 @@ from .html_parser import extract_table_rows_with_children, html_to_json_simple
 _LOGGER = logging.getLogger(__name__)
 
 
+class ZKHAPIConnectionError(Exception):
+    """The ZKHNSO service could not be reached or returned an error."""
+
+
 class ZKHAPIClient:
     """Client for interacting with ZKHNSO API."""
 
@@ -141,10 +145,9 @@ class ZKHAPIClient:
         )
 
     async def login(self) -> bool:
-        """Perform login after preflight."""
+        """Log in, returning False only when the login form is returned."""
         if not self.form_token or not self.jsessionid:
-            _LOGGER.error("Preflight must be called before login")
-            return False
+            raise ZKHAPIConnectionError("Preflight must be called before login")
 
         url = urljoin(API_BASE_URL, API_URL_LOGIN)
         form_payload = urlencode(
@@ -175,6 +178,10 @@ class ZKHAPIClient:
                     data=form_payload,
                     headers=headers,
             ) as response:
+                if response.status != 200:
+                    raise ZKHAPIConnectionError(
+                        f"Login request failed with HTTP status {response.status}"
+                    )
                 response_text = await response.text()
                 self._log_page_diagnostics("Login", response, response_text)
 
@@ -183,7 +190,7 @@ class ZKHAPIClient:
                     self.jsessionid = updated_jsessionid
                     _LOGGER.debug("JSESSIONID updated after login")
 
-                if response.status == 200 and not self._is_login_page(response_text):
+                if not self._is_login_page(response_text):
                     address = html_to_json_simple(response_text, ".header .address")
                     if isinstance(address, str):
                         self.address = " ".join(address.split()) or None
@@ -204,12 +211,10 @@ class ZKHAPIClient:
                 )
                 return False
 
-        except aiohttp.ClientError as e:
-            _LOGGER.error("Error during login request to url %s: %s", url, e)
-            return False
-        except Exception as e:
-            _LOGGER.exception("Unexpected error during login to url %s: %s", url, e)
-            return False
+        except ZKHAPIConnectionError:
+            raise
+        except Exception as err:
+            raise ZKHAPIConnectionError("Failed to connect to ZKHNSO during login") from err
 
     async def get_meters(self) -> dict[str, Any] | None:
         """Fetch meters/counters data."""
@@ -362,4 +367,3 @@ class ZKHAPIClient:
                 continue
 
         return tariffs
-
