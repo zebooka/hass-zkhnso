@@ -15,7 +15,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import CONF_ACCOUNT_ID, CONF_USERNAME
+from .const import CONF_ACCOUNT_ID, CONF_WATER_HEATING_RATE
 from .coordinator import ZKHDataUpdateCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -64,6 +64,7 @@ async def async_setup_entry(
                 ZKHTariffSensor(coordinator, key, tariff)
                 for key, tariff in tariffs.items()
             ]
+            _LOGGER.info("Configured water heating rate: %s Gcal/m³", entry.options.get(CONF_WATER_HEATING_RATE))
             entities.extend(tariff_entities)
             _LOGGER.info("Created %d tariff sensors", len(tariff_entities))
         else:
