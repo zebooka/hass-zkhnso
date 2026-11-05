@@ -153,9 +153,9 @@ system. It is established by legislation of Novosibirsk Oblast and, at the time 
 </tbody>
 </table>
 
-- **Closed hot-water supply system:** The heating and hot-water circuits are separate. Hot water is heated through a heat exchanger. This is typical of newer buildings. With an external hot-water network, water is heated outside the building at a heating station serving a group of buildings. Without an external network, water is heated at a heating station inside the building.
-- **Open hot-water supply system:** The same heat carrier is supplied to both the heating and hot-water systems. This is typical of older buildings.
-- **Insulated risers:** Hot-water supply pipes covered with a layer of thermal insulation.
+- **Closed hot-water supply system:** — The heating and hot-water circuits are separate. Hot water is heated through a heat exchanger. This is typical of newer buildings. With an external hot-water network, water is heated outside the building at a heating station serving a group of buildings. Without an external network, water is heated at a heating station inside the building.
+- **Open hot-water supply system:** — The same heat carrier is supplied to both the heating and hot-water systems. This is typical of older buildings.
+- **Insulated risers:** — Hot-water supply pipes covered with a layer of thermal insulation.
 
 ## Limitations and troubleshooting
 
