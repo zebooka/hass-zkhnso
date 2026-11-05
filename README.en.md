@@ -58,51 +58,25 @@ Data is updated once per hour. The integration creates entities for the meter re
 
 ## Calculating meter costs
 
-To calculate water costs in the **Energy** dashboard, create a template sensor manually.
-This is necessary because the tariff list provided by the management company does not contain complete water prices. 
-It lists the heat carrier, water heating, water supply, and wastewater tariffs separately. 
-For example, the hot-water price can be calculated as:
-`wastewater tariff + heat-carrier tariff + water-heating tariff × coefficient` or as `wastewater tariff + hot-water tariff`. 
-The cold-water price can be calculated as: `wastewater tariff + cold-water tariff`. Management companies use different 
-tariff names. Calculating water costs may require selecting tariffs for common property maintenance. Example tariff names:
-`ГВ НА СОИ (ПОДОГРЕВ)`,
-`ГВ НА СОИ (ТЕПЛОНОСИТ)`,
-`ГВ НА СОД-Е ОБЩ.ИМУЩ.`,
-`ГОРЯЧЕЕ ВОДОСНАБЖЕНИЕ (ПОДОГРЕВ)`,
-`ОТВЕД. СТОЧ. ВОД СОИ`,
-`ХВ НА СОД-Е ОБЩ.ИМУЩ.`,
-`ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ`.
+To calculate water costs in the **Energy** dashboard, select a combined hot- or cold-water tariff.
+There are two ways to create combined tariffs. First, the integration can attempt to create sensors for combined tariffs
+automatically using the **Water heating rate** setting.
 
-The coefficient for the hot-water formula that includes water heating must be entered manually, depending on the type of
-your water supply system. It is established by legislation of Novosibirsk Oblast and, at the time this README was written, is:
+### Automatic combined tariffs
 
-<table>
-<thead>
-<tr>
-<th rowspan="3">Apartment building or residential building construction features</th>
-<th colspan="3">Thermal energy consumption standards for heating cold water to provide the hot-water utility service, Gcal per 1 m³</th>
-</tr>
-<tr>
-<th colspan="2">Closed hot-water supply system</th>
-<th>Open heat-supply (hot-water supply) system</th>
-</tr>
-<tr>
-<th>With an external hot-water supply network</th>
-<th>Without an external hot-water supply network</th>
-<th>Without an external hot-water supply network</th>
-</tr>
-</thead>
-<tbody>
-<tr><td>Uninsulated risers and heated towel rails</td><td>0.06779</td><td>0.06528</td><td>0.06528</td></tr>
-<tr><td>Insulated risers and heated towel rails</td><td>0.06277</td><td>0.06026</td><td>0.06026</td></tr>
-<tr><td>Uninsulated risers without heated towel rails</td><td>0.06277</td><td>0.06026</td><td>0.06026</td></tr>
-<tr><td>Insulated risers without heated towel rails</td><td>0.05775</td><td>0.05524</td><td>0.05524</td></tr>
-</tbody>
-</table>
+Automatic combined tariffs require several conditions. First, the **water heating rate** must be set in the integration
+settings, either manually or automatically using the appropriate building features and hot-water system type. Second, the
+management company must provide the following tariffs through ZKHNSO:
+
+- For wastewater: `ВОДООТВЕДЕНИЕ` or `ОТВЕД. СТОЧ. ВОД СОИ`.
+- For hot water: `ГОРЯЧЕЕ ВОДОСНАБЖЕНИЕ`, or `ГВ НА СОД-Е ОБЩ.ИМУЩ.`, or a heating tariff (`ГОРЯЧЕЕ ВОДОСНАБЖЕНИЕ (ПОДОГРЕВ)` or `ГВ НА СОИ (ПОДОГРЕВ)`) plus a water or heat-carrier tariff (`ГОРЯЧЕЕ ВОДОСНАБЖЕНИЕ (ТЕПЛОНОСИТ)`, `ГВ НА СОИ (ТЕПЛОНОСИТ)`, `ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ`, or `ХВ НА СОД-Е ОБЩ.ИМУЩ.`).
+- For cold water: `ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ` or `ХВ НА СОД-Е ОБЩ.ИМУЩ.`.
+
+### Combined tariffs using template sensors
 
 You can create a template sensor in two ways: through the user interface or through `configuration.yaml`. The latter is preferable because it allows template editing, but it requires access to the **Home Assistant** file system.
 
-### Creating a template sensor through the user interface
+#### Creating a template sensor through the user interface
 
 1. Open **Settings → Devices & services**.
 2. Open the **Helpers** tab.
@@ -110,7 +84,7 @@ You can create a template sensor in two ways: through the user interface or thro
 4. Search for **Template**, then choose the **Sensor** subtype.
 5. Specify the name, state template, unit of measurement (`RUB/m³`), device (**ZKHNSO**), and an availability template in advanced settings.
 
-### Creating a template sensor through configuration.yaml
+#### Creating a template sensor through configuration.yaml
 
 Add the required sensors to `configuration.yaml`. Example configuration:
 
@@ -150,11 +124,44 @@ template:
         unit_of_measurement: "RUB/m³"
 ```
 
+### Thermal energy consumption standard for heating cold water in Novosibirsk Oblast
+
+Set the rate used to calculate the combined hot-water tariff in the configuration form according to your water supply
+system. It is established by legislation of Novosibirsk Oblast and, at the time this README was written in 2026, is:
+
+<table>
+<thead>
+<tr>
+<th rowspan="3">Apartment building or residential building construction features</th>
+<th colspan="3">Thermal energy consumption standards for heating cold water to provide the hot-water utility service, Gcal per 1 m³</th>
+</tr>
+<tr>
+<th colspan="2">Closed hot-water supply system</th>
+<th>Open heat-supply (hot-water supply) system</th>
+</tr>
+<tr>
+<th>With an external hot-water supply network</th>
+<th>Without an external hot-water supply network</th>
+<th>Without an external hot-water supply network</th>
+</tr>
+</thead>
+<tbody>
+<tr><td>Uninsulated risers and heated towel rails</td><td>0.06779</td><td>0.06528</td><td>0.06528</td></tr>
+<tr><td>Insulated risers and heated towel rails</td><td>0.06277</td><td>0.06026</td><td>0.06026</td></tr>
+<tr><td>Uninsulated risers without heated towel rails</td><td>0.06277</td><td>0.06026</td><td>0.06026</td></tr>
+<tr><td>Insulated risers without heated towel rails</td><td>0.05775</td><td>0.05524</td><td>0.05524</td></tr>
+</tbody>
+</table>
+
+- **Closed hot-water supply system:** The heating and hot-water circuits are separate. Hot water is heated through a heat exchanger. This is typical of newer buildings. With an external hot-water network, water is heated outside the building at a heating station serving a group of buildings. Without an external network, water is heated at a heating station inside the building.
+- **Open hot-water supply system:** The same heat carrier is supplied to both the heating and hot-water systems. This is typical of older buildings.
+- **Insulated risers:** Hot-water supply pipes covered with a layer of thermal insulation.
+
 ## Limitations and troubleshooting
 
 - The integration works only with ZKHNSO personal accounts in Novosibirsk Oblast.
 - If the ZKHNSO website is unavailable, Home Assistant retries the connection automatically.
-- After the set of meters or tariffs changes, reload the integration through **Settings → Devices & services** to create entities for new records.
+- New meters and tariffs are added automatically.
 - To remove the integration, open its page under **Settings → Devices & services** and select **Delete**.
 
 ## Support
@@ -169,3 +176,4 @@ This project is distributed under the MIT License.
 
 - novodim
 - GPT-5.6 Terra
+- GPT-6.1 Terra
