@@ -10,6 +10,7 @@ from homeassistant import config_entries
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.selector import TextSelector, TextSelectorConfig, TextSelectorType
 
 from .api_client import ZKHAPIClient, ZKHAPIConnectionError
 from .const import (
@@ -26,6 +27,15 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
     {
         vol.Required("username"): str,
         vol.Required("password"): str,
+    }
+)
+
+STEP_RECONFIGURE_SCHEMA = vol.Schema(
+    {
+        vol.Required(CONF_USERNAME): str,
+        vol.Required(CONF_PASSWORD): TextSelector(
+            TextSelectorConfig(type=TextSelectorType.PASSWORD)
+        ),
     }
 )
 
@@ -137,6 +147,65 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> FlowResult:
         """Confirm updated credentials."""
         return await self._async_step_credentials(user_input, reauth=True)
+
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Update credentials for the same account without replacing the entry."""
+        entry = self._get_reconfigure_entry()
+        errors = {}
+
+        if user_input is not None:
+            try:
+                info = await validate_input(self.hass, user_input)
+            except CannotConnect:
+                errors["base"] = "cannot_connect"
+            except InvalidAuth:
+                errors["base"] = "invalid_auth"
+            except AccountParseError:
+                errors["base"] = "account_parse_error"
+            except Exception:  # pylint: disable=broad-except
+                _LOGGER.exception("Unexpected exception during reconfiguration")
+                errors["base"] = "unknown"
+            else:
+                old_account_id = entry.data.get(CONF_ACCOUNT_ID)
+                if old_account_id is None:
+                    errors["base"] = "account_id_missing"
+                elif str(old_account_id) != str(info["account_id"]):
+                    errors["base"] = "account_mismatch"
+                else:
+                    username = info["username"].casefold()
+                    other_entries = self.hass.config_entries.async_entries(DOMAIN)
+                    if any(
+                        other.entry_id != entry.entry_id
+                        and (
+                            other.unique_id == username
+                            or str(other.data.get(CONF_USERNAME, "")).casefold() == username
+                        )
+                        for other in other_entries
+                    ):
+                        errors["base"] = "already_configured"
+                    else:
+                        return self.async_update_reload_and_abort(
+                            entry,
+                            unique_id=username,
+                            title=info["title"],
+                            data_updates={
+                                CONF_USERNAME: info["username"],
+                                CONF_PASSWORD: user_input[CONF_PASSWORD],
+                                CONF_ACCOUNT_ID: info["account_id"],
+                                CONF_ADDRESS: info["address"],
+                            },
+                        )
+
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=self.add_suggested_values_to_schema(
+                STEP_RECONFIGURE_SCHEMA,
+                {CONF_USERNAME: entry.data.get(CONF_USERNAME, "")},
+            ),
+            errors=errors,
+        )
 
 
 class CannotConnect(HomeAssistantError):

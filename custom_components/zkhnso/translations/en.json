@@ -9,6 +9,14 @@
           "password": "Password"
         }
       },
+      "reconfigure": {
+        "title": "Configure ZKHNSO connection",
+        "description": "Enter credentials for this account. The password must be entered again.",
+        "data": {
+          "username": "Username",
+          "password": "Password"
+        }
+      },
       "reauth_confirm": {
         "title": "Reconnect ZKHNSO",
         "description": "Update the credentials for {name}",
@@ -22,6 +30,9 @@
       "cannot_connect": "Unable to connect to ZKHNSO",
       "invalid_auth": "Invalid authentication",
       "account_parse_error": "Unable to determine the account number or address",
+      "account_id_missing": "The existing entry has no account number, so it cannot be verified",
+      "account_mismatch": "The credentials belong to a different account",
+      "already_configured": "This username is already used by another ZKHNSO entry",
       "unknown": "Unexpected error occurred"
     },
     "abort": {
