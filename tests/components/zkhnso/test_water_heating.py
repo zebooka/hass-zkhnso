@@ -1,7 +1,6 @@
 """Tests for water heating configuration and its coefficient table."""
 import asyncio
 import json
-import logging
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -11,7 +10,7 @@ import pytest
 from custom_components.zkhnso import _async_options_updated
 from custom_components.zkhnso import config_flow as flow_module
 from custom_components.zkhnso.config_flow import ConfigFlow, ZKHOptionsFlow
-from custom_components.zkhnso.sensor import async_setup_entry
+from custom_components.zkhnso.sensor import ZKHTariffSensor, async_setup_entry
 from custom_components.zkhnso.water_heating import BUILDING_FEATURES, SYSTEMS, water_heating_rate
 
 
@@ -217,8 +216,22 @@ def test_options_update_reloads_entry():
     reload.assert_awaited_once_with("entry")
 
 
-def test_sensor_setup_logs_configured_rate(caplog):
-    entry = SimpleNamespace(runtime_data=SimpleNamespace(data={}), options={"water_heating_rate": 0.06528})
-    with caplog.at_level(logging.INFO, logger="custom_components.zkhnso.sensor"):
-        asyncio.run(async_setup_entry(None, entry, MagicMock()))
-    assert "Configured water heating rate: 0.06528 Gcal/m³" in caplog.text
+def test_sensor_setup_with_configured_rate():
+    """A configured heating rate does not prevent tariff sensor creation."""
+    entry = SimpleNamespace(
+        entry_id="entry", data={"account_id": 42}, options={"water_heating_rate": 0.06528}
+    )
+    entry.runtime_data = SimpleNamespace(
+        entry=entry,
+        data={"tariffs": {"water": {"name": "Water", "unit": "куб.м.", "rate_per_unit": 50.25}}},
+    )
+    add_entities = MagicMock()
+    asyncio.run(async_setup_entry(None, entry, add_entities))
+    add_entities.assert_called_once()
+    args, kwargs = add_entities.call_args
+    assert kwargs == {"update_before_add": False}
+    assert len(args[0]) == 1
+    sensor = args[0][0]
+    assert isinstance(sensor, ZKHTariffSensor)
+    assert sensor.unique_id == "entry_tariff_water"
+    assert sensor.native_value == 50.25
