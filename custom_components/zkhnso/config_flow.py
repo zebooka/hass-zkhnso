@@ -347,16 +347,19 @@ class ZKHOptionsFlow(WaterHeatingFlow, config_entries.OptionsFlow):
         """Display the saved configuration below the type selector."""
         options = self.config_entry.options
         rate = options.get(CONF_WATER_HEATING_RATE)
+
+        if rate is None:
+            return self._rate_form("rate_type_unset", schema, errors)
+
         is_auto = options.get(CONF_RATE_TYPE) == "auto"
         features = options.get(CONF_BUILDING_FEATURES)
         system = options.get(CONF_HEATING_SYSTEM)
         placeholders = {
             "building_features": features if is_auto and features in BUILDING_FEATURES else "not_set",
             "heating_system": system if is_auto and system in SYSTEMS else "not_set",
+            "rate": str(rate),
         }
-        if rate is None:
-            return self._rate_form("rate_type_unset", schema, errors, placeholders)
-        placeholders["rate"] = str(rate)
+
         return self._rate_form(
             "rate_type", schema, errors, placeholders=placeholders
         )

@@ -1,8 +1,8 @@
 {
   "config": {
     "step": {
-      "rate_type": {"title": "Water heating rate", "description": "Choose how to set the heat consumption rate for water heating.", "data": {"rate_type": "Type"}},
-      "rate_manual": {"title": "Water heating rate", "description": "Enter the rate in Gcal/m³.", "data": {"manual_rate": "Rate, Gcal/m³"}},
+      "rate_type": {"title": "Water heating rate", "description": "Choose how to set the heat consumption rate for cold water heating.", "data": {"rate_type": "Type"}},
+      "rate_manual": {"title": "Cold water heating rate", "description": "Enter the rate in Gcal/m³.", "data": {"manual_rate": "Rate, Gcal/m³"}},
       "rate_auto": {"title": "Calculate water heating rate", "description": "Choose the hot water system and building features.", "data": {"heating_system": "Hot water system type", "building_features": "Building features"}},
       "rate_confirm": {"title": "Confirm the rate", "description": "Calculated rate: {rate} Gcal/m³. Confirm your selection."},
       "user": {
