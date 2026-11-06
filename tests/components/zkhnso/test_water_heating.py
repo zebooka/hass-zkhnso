@@ -1,6 +1,7 @@
 """Tests for water heating configuration and its coefficient table."""
 import asyncio
 import json
+import string
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -59,22 +60,18 @@ def test_options_show_saved_rate_below_type(monkeypatch, rate):
     flow = _options_flow(monkeypatch, {"water_heating_rate": rate, "rate_type": "manual"})
     form = asyncio.run(flow.async_step_init())
     assert form["step_id"] == "rate_type"
-    assert form["description_placeholders"] == {
-        "rate": str(rate), "building_features": "not_set", "heating_system": "not_set",
-    }
+    assert form["description_placeholders"] == {"rate": str(rate)}
     assert _suggested(form)["rate_type"] == "manual"
     for language in ("ru", "en"):
         translation = json.loads(
             (Path(flow_module.__file__).parent / "translations" / f"{language}.json").read_text(encoding="utf-8")
         )
         helper = translation["options"]["step"][form["step_id"]]["data_description"]["rate_type"]
-        lines = helper.splitlines()
-        assert len(lines) == 7
-        assert lines[2] == lines[5] == ""
-        assert lines[1].startswith("{building_features, select,")
-        assert lines[4].startswith("{heating_system, select,")
-        assert "{rate}" in lines[6]
-        assert "Gcal/m³" in lines[6] or "Гкал/м³" in lines[6]
+        expected = {
+            "ru": f"Текущий норматив — {rate} Гкал/м³",
+            "en": f"Current rate — {rate} Gcal/m³",
+        }
+        assert helper.format(**form["description_placeholders"]) == expected[language]
 
 
 @pytest.mark.parametrize("options", [{}, {"water_heating_rate": None, "rate_type": "none"}])
@@ -94,30 +91,23 @@ def test_options_show_unset_and_handle_submission(monkeypatch, options):
 
 @pytest.mark.parametrize("system", SYSTEMS)
 @pytest.mark.parametrize("features", BUILDING_FEATURES)
-def test_auto_summary_uses_saved_options_and_localized_labels(monkeypatch, system, features):
-    """Each auto combination is passed to the localized summary."""
+def test_auto_summary_and_selections_are_restored(monkeypatch, system, features):
+    """Each auto combination displays the saved rate and restores its selections."""
     flow = _options_flow(monkeypatch, {
         "rate_type": "auto", "water_heating_rate": water_heating_rate(system, features),
         "heating_system": system, "building_features": features,
     })
     form = asyncio.run(flow.async_step_init())
-    assert form["description_placeholders"] == {
-        "rate": str(water_heating_rate(system, features)),
-        "heating_system": system, "building_features": features,
-    }
+    assert form["description_placeholders"] == {"rate": str(water_heating_rate(system, features))}
+    assert _suggested(form)["rate_type"] == "auto"
+    auto_form = asyncio.run(flow.async_step_rate_type({"rate_type": "auto"}))
+    assert _suggested(auto_form) == {"heating_system": system, "building_features": features}
     for language in ("ru", "en"):
         translation = json.loads(
             (Path(flow_module.__file__).parent / "translations" / f"{language}.json").read_text(encoding="utf-8")
         )
-        helper = translation["options"]["step"]["rate_type"]["data_description"]["rate_type"]
-        lines = helper.splitlines()
-        assert len(lines) == 7
-        assert lines[0] == {"ru": "Конструктивные особенности дома:", "en": "Building features:"}[language]
-        assert f'{features} {{{translation["selector"]["building_features"]["options"][features]}}}' in lines[1]
-        assert lines[2] == lines[5] == ""
-        assert lines[3] == {"ru": "Тип системы горячего водоснабжения:", "en": "Hot water system type:"}[language]
-        assert f'{system} {{{translation["selector"]["heating_system"]["options"][system]}}}' in lines[4]
-        assert "{rate}" in lines[6]
+        assert translation["selector"]["building_features"]["options"][features]
+        assert translation["selector"]["heating_system"]["options"][system]
 
 
 @pytest.mark.parametrize("rate_type", ["manual", "none"])
@@ -127,9 +117,13 @@ def test_summary_hides_stale_auto_selections(monkeypatch, rate_type):
         "rate_type": rate_type, "water_heating_rate": 0.05 if rate_type == "manual" else None,
         "heating_system": SYSTEMS[0], "building_features": BUILDING_FEATURES[0],
     })
-    placeholders = asyncio.run(flow.async_step_init())["description_placeholders"]
-    assert placeholders["building_features"] == "not_set"
-    assert placeholders["heating_system"] == "not_set"
+    form = asyncio.run(flow.async_step_init())
+    if rate_type == "none":
+        assert form["step_id"] == "rate_type_unset"
+        assert form["description_placeholders"] is None
+    else:
+        assert form["step_id"] == "rate_type"
+        assert form["description_placeholders"] == {"rate": "0.05"}
 
 
 def test_summary_uses_only_saved_options(monkeypatch):
@@ -140,7 +134,26 @@ def test_summary_uses_only_saved_options(monkeypatch):
     })
     asyncio.run(flow.async_step_rate_auto({"heating_system": SYSTEMS[1], "building_features": BUILDING_FEATURES[3]}))
     summary = asyncio.run(flow.async_step_init())["description_placeholders"]
-    assert summary == {"rate": "0.06779", "heating_system": SYSTEMS[0], "building_features": BUILDING_FEATURES[0]}
+    assert summary == {"rate": "0.06779"}
+
+
+@pytest.mark.parametrize("language", ["ru", "en"])
+def test_translation_placeholders_are_valid(language):
+    """Ensure translation placeholders are valid identifiers for hassfest."""
+    translation = json.loads(
+        (Path(flow_module.__file__).parent / "translations" / f"{language}.json").read_text(encoding="utf-8")
+    )
+
+    def check(value):
+        if isinstance(value, dict):
+            for item in value.values():
+                check(item)
+        elif isinstance(value, str):
+            for _, name, _, _ in string.Formatter().parse(value):
+                if name:
+                    assert name.isidentifier()
+
+    check(translation)
 
 
 def test_options_manual_validation_and_restore(monkeypatch):
