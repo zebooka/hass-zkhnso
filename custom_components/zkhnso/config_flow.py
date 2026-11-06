@@ -351,18 +351,7 @@ class ZKHOptionsFlow(WaterHeatingFlow, config_entries.OptionsFlow):
         if rate is None:
             return self._rate_form("rate_type_unset", schema, errors)
 
-        is_auto = options.get(CONF_RATE_TYPE) == "auto"
-        features = options.get(CONF_BUILDING_FEATURES)
-        system = options.get(CONF_HEATING_SYSTEM)
-        placeholders = {
-            "building_features": features if is_auto and features in BUILDING_FEATURES else "not_set",
-            "heating_system": system if is_auto and system in SYSTEMS else "not_set",
-            "rate": str(rate),
-        }
-
-        return self._rate_form(
-            "rate_type", schema, errors, placeholders=placeholders
-        )
+        return self._rate_form("rate_type", schema, errors, {"rate": str(rate)})
 
     async def async_step_init(self, user_input=None):
         return await self.async_step_rate_type(user_input)

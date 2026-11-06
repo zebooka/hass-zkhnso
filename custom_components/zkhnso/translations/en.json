@@ -1,10 +1,32 @@
 {
   "config": {
     "step": {
-      "rate_type": {"title": "Water heating rate", "description": "Choose how to set the heat consumption rate for cold water heating.", "data": {"rate_type": "Type"}},
-      "rate_manual": {"title": "Cold water heating rate", "description": "Enter the rate in Gcal/m³.", "data": {"manual_rate": "Rate, Gcal/m³"}},
-      "rate_auto": {"title": "Calculate water heating rate", "description": "Choose the hot water system and building features.", "data": {"heating_system": "Hot water system type", "building_features": "Building features"}},
-      "rate_confirm": {"title": "Confirm the rate", "description": "Calculated rate: {rate} Gcal/m³. Confirm your selection."},
+      "rate_type": {
+        "title": "Water heating rate",
+        "description": "Choose how to set the heat consumption rate for cold water heating.",
+        "data": {
+          "rate_type": "Type"
+        }
+      },
+      "rate_manual": {
+        "title": "Cold water heating rate",
+        "description": "Enter the rate in Gcal/m³.",
+        "data": {
+          "manual_rate": "Rate, Gcal/m³"
+        }
+      },
+      "rate_auto": {
+        "title": "Calculate water heating rate",
+        "description": "Choose the hot water system and building features.",
+        "data": {
+          "heating_system": "Hot water system type",
+          "building_features": "Building features"
+        }
+      },
+      "rate_confirm": {
+        "title": "Confirm the rate",
+        "description": "Calculated rate: {rate} Gcal/m³. Confirm your selection."
+      },
       "user": {
         "title": "ZKHNSO Configuration",
         "description": "Enter your ZKHNSO credentials",
@@ -49,18 +71,75 @@
   },
   "options": {
     "step": {
-      "rate_type": {"title": "Water heating rate", "description": "Choose how to set the heat consumption rate for water heating.", "data": {"rate_type": "Type"}, "data_description": {"rate_type": "Building features:\n{building_features, select, uninsulated_with_towel_rails {Uninsulated risers with towel warmers} insulated_with_towel_rails {Insulated risers with towel warmers} uninsulated_without_towel_rails {Uninsulated risers without towel warmers} insulated_without_towel_rails {Insulated risers without towel warmers} other {not set}}\n\nHot water system type:\n{heating_system, select, closed_external {Closed, with external hot water network} closed_internal {Closed, without external hot water network} open_internal {Open, without external hot water network} other {not set}}\n\nCurrent rate — {rate} Gcal/m³"}},
-      "rate_type_unset": {"title": "Water heating rate", "description": "Choose how to set the heat consumption rate for water heating.", "data": {"rate_type": "Type"}, "data_description": {"rate_type": "Current rate — not set"}},
-      "rate_manual": {"title": "Water heating rate", "description": "Enter the rate in Gcal/m³.", "data": {"manual_rate": "Rate, Gcal/m³"}},
-      "rate_auto": {"title": "Calculate water heating rate", "description": "Choose the hot water system and building features.", "data": {"heating_system": "Hot water system type", "building_features": "Building features"}},
-      "rate_confirm": {"title": "Confirm the rate", "description": "Calculated rate: {rate} Gcal/m³. Confirm your selection."}
+      "rate_type": {
+        "title": "Water heating rate",
+        "description": "Choose how to set the heat consumption rate for water heating.",
+        "data": {
+          "rate_type": "Type"
+        },
+        "data_description": {
+          "rate_type": "Current rate — {rate} Gcal/m³"
+        }
+      },
+      "rate_type_unset": {
+        "title": "Water heating rate",
+        "description": "Choose how to set the heat consumption rate for water heating.",
+        "data": {
+          "rate_type": "Type"
+        },
+        "data_description": {
+          "rate_type": "Current rate — not set"
+        }
+      },
+      "rate_manual": {
+        "title": "Water heating rate",
+        "description": "Enter the rate in Gcal/m³.",
+        "data": {
+          "manual_rate": "Rate, Gcal/m³"
+        }
+      },
+      "rate_auto": {
+        "title": "Calculate water heating rate",
+        "description": "Choose the hot water system and building features.",
+        "data": {
+          "heating_system": "Hot water system type",
+          "building_features": "Building features"
+        }
+      },
+      "rate_confirm": {
+        "title": "Confirm the rate",
+        "description": "Calculated rate: {rate} Gcal/m³. Confirm your selection."
+      }
     },
-    "error": {"invalid_rate_type": "Select a rate type", "invalid_rate": "Enter a finite non-negative number", "invalid_selection": "Select a valid system and building features"}
+    "error": {
+      "invalid_rate_type": "Select a rate type",
+      "invalid_rate": "Enter a finite non-negative number",
+      "invalid_selection": "Select a valid system and building features"
+    }
   },
   "selector": {
-    "rate_type": {"options": {"none": "None", "auto": "Auto", "manual": "Manual"}},
-    "building_features": {"options": {"uninsulated_with_towel_rails": "Uninsulated risers with towel warmers", "insulated_with_towel_rails": "Insulated risers with towel warmers", "uninsulated_without_towel_rails": "Uninsulated risers without towel warmers", "insulated_without_towel_rails": "Insulated risers without towel warmers"}},
-    "heating_system": {"options": {"closed_external": "Closed, with external hot water network", "closed_internal": "Closed, without external hot water network", "open_internal": "Open, without external hot water network"}}
+    "rate_type": {
+      "options": {
+        "none": "None",
+        "auto": "Auto",
+        "manual": "Manual"
+      }
+    },
+    "building_features": {
+      "options": {
+        "uninsulated_with_towel_rails": "Uninsulated risers with towel warmers",
+        "insulated_with_towel_rails": "Insulated risers with towel warmers",
+        "uninsulated_without_towel_rails": "Uninsulated risers without towel warmers",
+        "insulated_without_towel_rails": "Insulated risers without towel warmers"
+      }
+    },
+    "heating_system": {
+      "options": {
+        "closed_external": "Closed, with external hot water network",
+        "closed_internal": "Closed, without external hot water network",
+        "open_internal": "Open, without external hot water network"
+      }
+    }
   },
   "entity": {
     "sensor": {
