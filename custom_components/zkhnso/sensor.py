@@ -272,6 +272,7 @@ class ZKHCombinedTariffSensor(CoordinatorEntity, SensorEntity):
                     and tariff.get("unit") in units
                 ):
                     return tariff
+
         return None
 
 class ZKHCombinedColdWaterTariffSensor(ZKHCombinedTariffSensor):
@@ -346,6 +347,7 @@ class ZKHCombinedHotWaterTariffSensor(ZKHCombinedTariffSensor):
             return waste_water.get("rate_per_unit") + hot_water.get("rate_per_unit")
 
         if self._water_heating_rate is None:
+            _LOGGER.warning("Water heating rate not set for %s", self.coordinator.entry.entry_id)
             return None
 
         hot_water_heating = self._hot_water_heating
