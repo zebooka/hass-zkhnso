@@ -11,7 +11,7 @@ import pytest
 from custom_components.zkhnso import _async_options_updated
 from custom_components.zkhnso import config_flow as flow_module
 from custom_components.zkhnso.config_flow import ConfigFlow, ZKHOptionsFlow
-from custom_components.zkhnso.sensor import ZKHTariffSensor, async_setup_entry
+from custom_components.zkhnso.sensor import ZKHCombinedColdWaterTariffSensor, ZKHTariffSensor, async_setup_entry
 from custom_components.zkhnso.water_heating import BUILDING_FEATURES, SYSTEMS, water_heating_rate
 
 
@@ -243,8 +243,9 @@ def test_sensor_setup_with_configured_rate():
     add_entities.assert_called_once()
     args, kwargs = add_entities.call_args
     assert kwargs == {"update_before_add": False}
-    assert len(args[0]) == 1
-    sensor = args[0][0]
+    assert len(args[0]) == 2
+    assert sum(isinstance(entity, ZKHCombinedColdWaterTariffSensor) for entity in args[0]) == 1
+    sensor = next(entity for entity in args[0] if isinstance(entity, ZKHTariffSensor))
     assert isinstance(sensor, ZKHTariffSensor)
     assert sensor.unique_id == "entry_tariff_water"
     assert sensor.native_value == 50.25

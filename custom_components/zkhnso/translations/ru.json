@@ -148,6 +148,9 @@
       },
       "tariff": {
         "name": "Тариф {name} ({account_id})"
+      },
+      "combined_tariff": {
+        "name": "Суммарный тариф {name} ({account_id})"
       }
     }
   }

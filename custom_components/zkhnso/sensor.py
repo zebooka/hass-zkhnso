@@ -24,6 +24,10 @@ SQUARE_UNITS = {"кв.м.", "кв.м", "м²", "m²"}
 VOLUME_UNITS = {"куб.м.", "куб.м", "м³", "m³"}
 ELECTRIC_UNITS = {"кВтч", "кВт·ч", "кВт⋅ч", "kWh"}
 HEAT_UNITS = {"Гкал", "Gcal"}
+WASTE_WATER_TARIFFS = ["ВОДООТВЕДЕНИЕ", "ОТВЕД. СТОЧ. ВОД СОИ"]
+COLD_WATER_TARIFFS = ["ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ", "ХВ НА СОД-Е ОБЩ.ИМУЩ."]
+HOT_WATER_TARIFFS = []
+HOT_WATER_HEATING_TARIFFS = []
 PARALLEL_UPDATES = 0
 
 
@@ -64,6 +68,7 @@ async def async_setup_entry(
                 ZKHTariffSensor(coordinator, key, tariff)
                 for key, tariff in tariffs.items()
             ]
+            tariff_entities.append(ZKHCombinedColdWaterTariffSensor(coordinator))
             _LOGGER.info("Configured water heating rate: %s Gcal/m³", entry.options.get(CONF_WATER_HEATING_RATE))
             entities.extend(tariff_entities)
             _LOGGER.info("Created %d tariff sensors", len(tariff_entities))
@@ -222,3 +227,93 @@ class ZKHTariffSensor(CoordinatorEntity, SensorEntity):
         if unit in HEAT_UNITS:
             return f"RUB/{UnitOfEnergy.GIGA_CALORIE}"
         return f"RUB/{unit}" if unit else "RUB"
+
+class ZKHCombinedTariffSensor(CoordinatorEntity, SensorEntity):
+    """Representation of a ZKH combined tariff sensor."""
+
+    _attr_has_entity_name = True
+
+    def __init__(
+        self,
+        coordinator: ZKHDataUpdateCoordinator,
+        name: str,
+    ) -> None:
+        """Initialize the tariff sensor."""
+        super().__init__(coordinator)
+        self.key = type
+        self._attr_unique_id = f"{self.coordinator.entry.entry_id}_combined_tariff_{name}"
+        self._attr_translation_key = "combined_tariff"
+        self._attr_translation_placeholders = {
+            "name": str(name),
+            "account_id": str(self.coordinator.entry.data.get(CONF_ACCOUNT_ID)),
+        }
+        self._attr_native_unit_of_measurement = f"RUB/{UnitOfVolume.CUBIC_METERS}"
+        self._attr_icon = "mdi:sigma"
+
+    @property
+    def _waste_water(self) -> dict[str, Any] | None:
+        return self._get_first_available_tariff(WASTE_WATER_TARIFFS)
+
+    def _get_first_available_tariff(self, names: list[str]) -> dict[str, Any] | None:
+        """Return the first tariff with a value, in the given name order."""
+        data = self.coordinator.data
+        tariffs = data.get("tariffs") if isinstance(data, dict) else None
+        if not isinstance(tariffs, dict):
+            return None
+
+        for name in names:
+            for tariff in tariffs.values():
+                if (
+                    isinstance(tariff, dict)
+                    and tariff.get("name") == name
+                    and tariff.get("rate_per_unit") is not None
+                    and tariff.get("unit") in VOLUME_UNITS
+                ):
+                    return tariff
+        return None
+
+class ZKHCombinedColdWaterTariffSensor(ZKHCombinedTariffSensor):
+    """Representation of a ZKH combined cold water tariff sensor."""
+    def __init__(
+        self,
+        coordinator: ZKHDataUpdateCoordinator
+    ) -> None:
+        """Initialize the tariff sensor."""
+        super().__init__(coordinator, "ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ")
+
+    @property
+    def _cold_water(self) -> dict[str, Any] | None:
+        return self._get_first_available_tariff(COLD_WATER_TARIFFS)
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the combined cold water tariff value."""
+        waste_water = self._waste_water
+        cold_water = self._cold_water
+
+        return waste_water.get("rate_per_unit") + cold_water.get("rate_per_unit") \
+            if waste_water is not None and cold_water is not None else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return  the combined cold water tariff attributes."""
+        waste_water = self._waste_water
+        cold_water = self._cold_water
+        if waste_water is None or cold_water is None:
+            return {}
+
+        dates = [waste_water.get("from_date"), cold_water.get("from_date")]
+
+        return {
+            "names": [waste_water.get("name"), cold_water.get("name")],
+            "from_date": max((date for date in dates if date is not None), default=None),
+        }
+
+class ZKHCombinedHotWaterTariffSensor(ZKHCombinedTariffSensor):
+    """Representation of a ZKH combined hot water tariff sensor."""
+    def __init__(
+        self,
+        coordinator: ZKHDataUpdateCoordinator
+    ) -> None:
+        """Initialize the tariff sensor."""
+        super().__init__(coordinator, "ГОРЯЧЕЕ ВОДОСНАБЖЕНИЕ")
