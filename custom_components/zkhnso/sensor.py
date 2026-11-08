@@ -309,6 +309,7 @@ class ZKHCombinedColdWaterTariffSensor(ZKHCombinedTariffSensor):
 
         return {
             "names": [waste_water.get("name"), cold_water.get("name")],
+            "formula": f"{waste_water.get('name')} + {cold_water.get('name')}",
             "from_date": max((date for date in dates if date is not None), default=None),
         }
 
@@ -371,6 +372,7 @@ class ZKHCombinedHotWaterTariffSensor(ZKHCombinedTariffSensor):
             dates.append(hot_water.get("from_date"))
             return {
                 "names": [waste_water.get("name"), hot_water.get("name")],
+                "formula": f"{waste_water.get('name')} + {hot_water.get('name')}",
                 "from_date": max((date for date in dates if date is not None), default=None),
             }
 
@@ -384,6 +386,7 @@ class ZKHCombinedHotWaterTariffSensor(ZKHCombinedTariffSensor):
             dates.append(hot_water_heating.get("from_date"))
             return {
                 "names": [waste_water.get("name"), hot_water_fluid.get("name"), hot_water_heating.get("name")],
+                "formula": f"{waste_water.get('name')} + {hot_water_fluid.get('name')} + {hot_water_heating.get('name')} × {self._water_heating_rate}",
                 "from_date": max((date for date in dates if date is not None), default=None),
             }
 

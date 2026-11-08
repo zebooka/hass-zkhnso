@@ -174,7 +174,11 @@ def test_combined_cold_water_calculates_rate_and_attributes(waste_name, cold_nam
     cold = _tariff(cold_name, 30.25, "2026-03-01")
     sensor = ZKHCombinedColdWaterTariffSensor(_coordinator({"tariffs": {"waste": waste, "cold": cold}}))
     assert sensor.native_value == 42.75
-    assert sensor.extra_state_attributes == {"names": [waste_name, cold_name], "from_date": "2026-03-01"}
+    assert sensor.extra_state_attributes == {
+        "names": [waste_name, cold_name],
+        "formula": f"{waste_name} + {cold_name}",
+        "from_date": "2026-03-01",
+    }
 
 
 @pytest.mark.parametrize("dates,expected", [
@@ -248,7 +252,9 @@ def test_combined_hot_water_direct_tariff(hot_name) -> None:
     sensor = ZKHCombinedHotWaterTariffSensor(coordinator, None)
     assert sensor.native_value == 62.5
     assert sensor.extra_state_attributes == {
-        "names": ["ВОДООТВЕДЕНИЕ", hot_name], "from_date": "2026-03-01"
+        "names": ["ВОДООТВЕДЕНИЕ", hot_name],
+        "formula": f"ВОДООТВЕДЕНИЕ + {hot_name}",
+        "from_date": "2026-03-01",
     }
 
 
@@ -266,6 +272,7 @@ def test_combined_hot_water_heating_calculation(heating_name, fluid_name, heat_u
     assert sensor.native_value == 123.34
     assert sensor.extra_state_attributes == {
         "names": ["ОТВЕД. СТОЧ. ВОД СОИ", fluid_name, heating_name],
+        "formula": f"ОТВЕД. СТОЧ. ВОД СОИ + {fluid_name} + {heating_name} × 0.06528",
         "from_date": "2026-03-01",
     }
 
@@ -301,6 +308,7 @@ def test_combined_hot_water_without_heating_rate() -> None:
     assert zero_rate_sensor.native_value == 15
     assert zero_rate_sensor.extra_state_attributes == {
         "names": ["ВОДООТВЕДЕНИЕ", "ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ", "ОТОПЛЕНИЕ"],
+        "formula": "ВОДООТВЕДЕНИЕ + ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ + ОТОПЛЕНИЕ × 0",
         "from_date": "2026-03-01",
     }
 
