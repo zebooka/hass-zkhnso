@@ -58,19 +58,23 @@ Data is updated once per hour. The integration creates entities for the meter re
 
 ## Calculating meter costs
 
-To calculate water costs in the **Energy** dashboard, select a combined hot- or cold-water tariff.
-There are two ways to create combined tariffs. First, the integration can attempt to create sensors for combined tariffs
-automatically using the **Water heating rate** setting.
+To calculate water costs in the **Energy** dashboard, you need combined hot- and cold-water tariffs. There are two ways to create them: the integration can attempt to create combined tariff sensors automatically using the available wastewater, cold-water, and hot-water tariffs, or you can create tariff sensors manually using templates.
 
 ### Automatic combined tariffs
 
-Automatic combined tariffs require several conditions. First, the **water heating rate** must be set in the integration
-settings, either manually or automatically using the appropriate building features and hot-water system type. Second, the
-management company must provide the following tariffs through ZKHNSO:
+Automatic combined tariffs require several conditions. First, the management company must provide the following tariff options through ZKHNSO:
 
 - For wastewater: `ВОДООТВЕДЕНИЕ` or `ОТВЕД. СТОЧ. ВОД СОИ`.
-- For hot water: `ГОРЯЧЕЕ ВОДОСНАБЖЕНИЕ`, or `ГВ НА СОД-Е ОБЩ.ИМУЩ.`, or a heating tariff (`ГОРЯЧЕЕ ВОДОСНАБЖЕНИЕ (ПОДОГРЕВ)` or `ГВ НА СОИ (ПОДОГРЕВ)`) plus a water or heat-carrier tariff (`ГОРЯЧЕЕ ВОДОСНАБЖЕНИЕ (ТЕПЛОНОСИТ)`, `ГВ НА СОИ (ТЕПЛОНОСИТ)`, `ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ`, or `ХВ НА СОД-Е ОБЩ.ИМУЩ.`).
 - For cold water: `ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ` or `ХВ НА СОД-Е ОБЩ.ИМУЩ.`.
+- For hot water:
+  - Option 1: `ГОРЯЧЕЕ ВОДОСНАБЖЕНИЕ` or `ГВ НА СОД-Е ОБЩ.ИМУЩ.`.
+  - Option 2:
+    - Heating: `ГОРЯЧЕЕ ВОДОСНАБЖЕНИЕ (ПОДОГРЕВ)`, `ГВ НА СОИ (ПОДОГРЕВ)`, or `ОТОПЛЕНИЕ`.
+    - Heat carrier: `ГОРЯЧЕЕ ВОДОСНАБЖЕНИЕ (ТЕПЛОНОСИТ)`, `ГВ НА СОИ (ТЕПЛОНОСИТ)`, `ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ`, or `ХВ НА СОД-Е ОБЩ.ИМУЩ.`.
+
+Second, if heating tariffs are used to calculate the combined hot-water tariff, the **water heating rate** must be set in the integration settings. It can be entered manually or calculated automatically based on the [building features and hot-water system type](#thermal-energy-consumption-standard-for-heating-cold-water-in-novosibirsk-oblast).
+
+Currently, tariffs are selected automatically in priority order.
 
 ### Combined tariffs using template sensors
 
@@ -175,5 +179,6 @@ This project is distributed under the MIT License.
 ## Thanks
 
 - novodim
+- slavijan
 - GPT-5.6 Terra
 - GPT-6.1 Terra
