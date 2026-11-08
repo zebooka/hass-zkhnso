@@ -191,6 +191,12 @@ class ConfigFlow(WaterHeatingFlow, config_entries.ConfigFlow, domain=DOMAIN):
 
     VERSION = 1
 
+    def _existing_heating_options(self) -> dict[str, Any]:
+        """Restore the saved options when reconfiguring an existing entry."""
+        if hasattr(self, "_reconfigure_entry"):
+            return dict(self._reconfigure_entry.options)
+        return {}
+
     async def _async_step_credentials(
         self, user_input: dict[str, Any] | None, *, reauth: bool = False
     ) -> FlowResult:
@@ -256,7 +262,15 @@ class ConfigFlow(WaterHeatingFlow, config_entries.ConfigFlow, domain=DOMAIN):
         return ZKHOptionsFlow()
 
     async def _finish_water_heating(self):
-        """Create the entry only after the heating rate has been selected."""
+        """Save the entry only after the heating rate has been selected."""
+        if hasattr(self, "_reconfigure_entry"):
+            return self.async_update_reload_and_abort(
+                self._reconfigure_entry,
+                unique_id=self._entry_data[CONF_USERNAME].casefold(),
+                title=self._entry_title,
+                data_updates=self._entry_data,
+                options=self._heating_options(),
+            )
         self._abort_if_unique_id_configured()
         return self.async_create_entry(
             title=self._entry_title, data=self._entry_data, options=self._heating_options()
@@ -315,17 +329,15 @@ class ConfigFlow(WaterHeatingFlow, config_entries.ConfigFlow, domain=DOMAIN):
                     ):
                         errors["base"] = "already_configured"
                     else:
-                        return self.async_update_reload_and_abort(
-                            entry,
-                            unique_id=username,
-                            title=info["title"],
-                            data_updates={
-                                CONF_USERNAME: info["username"],
-                                CONF_PASSWORD: user_input[CONF_PASSWORD],
-                                CONF_ACCOUNT_ID: info["account_id"],
-                                CONF_ADDRESS: info["address"],
-                            },
-                        )
+                        self._reconfigure_entry = entry
+                        self._entry_title = info["title"]
+                        self._entry_data = {
+                            CONF_USERNAME: info["username"],
+                            CONF_PASSWORD: user_input[CONF_PASSWORD],
+                            CONF_ACCOUNT_ID: info["account_id"],
+                            CONF_ADDRESS: info["address"],
+                        }
+                        return await self.async_step_rate_type()
 
         return self.async_show_form(
             step_id="reconfigure",

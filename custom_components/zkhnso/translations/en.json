@@ -66,7 +66,8 @@
     },
     "abort": {
       "already_configured": "ZKHNSO is already configured",
-      "reauth_successful": "ZKHNSO credentials were updated"
+      "reauth_successful": "ZKHNSO credentials were updated",
+      "reconfigure_successful": "ZKHNSO settings were updated"
     }
   },
   "options": {

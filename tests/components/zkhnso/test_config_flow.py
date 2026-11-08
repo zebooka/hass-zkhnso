@@ -64,11 +64,12 @@ def test_login_failure_classification(monkeypatch, login_result, expected, error
     assert result["errors"] == {"base": error_key}
 
 
-def _reconfigure_flow(monkeypatch, account_id=123, other_entries=()):
+def _reconfigure_flow(monkeypatch, account_id=123, other_entries=(), options=None):
     """Set up a reconfiguration flow and a config entry manager double."""
     entry = SimpleNamespace(
         entry_id="entry-1",
         unique_id="old-user",
+        options=options or {},
         data={"username": "old-user", "password": "old-secret", "account_id": account_id,
               "address": "Old address", "extra": "preserve"},
     )
@@ -108,6 +109,10 @@ def test_reconfigure_updates_existing_entry_and_reloads(monkeypatch) -> None:
     monkeypatch.setattr(flow_module, "validate_input", validate)
     result = asyncio.run(flow.async_step_reconfigure({"username": "New-User", "password": "new-secret"}))
 
+    assert result["step_id"] == "rate_type"
+    manager.async_update_entry.assert_not_called()
+    manager.async_schedule_reload.assert_not_called()
+    result = asyncio.run(flow.async_step_rate_type({"rate_type": "none"}))
     assert result == {"reason": "reconfigure_successful"}
     kwargs = manager.async_update_entry.call_args.kwargs
     assert kwargs["entry"] is entry
@@ -117,6 +122,60 @@ def test_reconfigure_updates_existing_entry_and_reloads(monkeypatch) -> None:
         "username": "New-User", "password": "new-secret", "account_id": 123,
         "address": "New address", "extra": "preserve",
     }
+    assert kwargs["options"] == {"rate_type": "none", "water_heating_rate": None}
+    manager.async_schedule_reload.assert_called_once_with("entry-1")
+
+
+@pytest.mark.parametrize("rate_type", ["none", "manual", "auto"])
+def test_reconfigure_collects_and_saves_heating_options(monkeypatch, rate_type) -> None:
+    """Reconfigure preserves existing options and saves only after the final step."""
+    import custom_components.zkhnso.config_flow as flow_module
+
+    existing_options = {
+        "other": 42, "rate_type": "manual", "manual_rate": "0.04", "water_heating_rate": 0.04,
+        "building_features": "insulated_without_towel_rails", "heating_system": "closed_external",
+    }
+    flow, entry, manager = _reconfigure_flow(monkeypatch, options=existing_options)
+    monkeypatch.setattr(flow_module, "validate_input", AsyncMock(return_value={
+        "username": "New-User", "account_id": 123, "address": "New address", "title": "Account",
+    }))
+    form = asyncio.run(flow.async_step_reconfigure({"username": "New-User", "password": "secret"}))
+    assert form["step_id"] == "rate_type"
+    assert next(key for key in form["data_schema"].schema if key.schema == "rate_type").description["suggested_value"] == "manual"
+    assert entry.options == existing_options
+    manager.async_update_entry.assert_not_called()
+
+    result = asyncio.run(flow.async_step_rate_type({"rate_type": rate_type}))
+    if rate_type == "manual":
+        assert result["step_id"] == "rate_manual"
+        assert next(key for key in result["data_schema"].schema if key.schema == "manual_rate").description["suggested_value"] == "0.04"
+        invalid = asyncio.run(flow.async_step_rate_manual({"manual_rate": "invalid"}))
+        assert invalid["errors"] == {"base": "invalid_rate"}
+        manager.async_update_entry.assert_not_called()
+        result = asyncio.run(flow.async_step_rate_manual({"manual_rate": "0,05"}))
+    elif rate_type == "auto":
+        assert result["step_id"] == "rate_auto"
+        suggested = {key.schema: key.description["suggested_value"] for key in result["data_schema"].schema}
+        assert suggested == {"heating_system": "closed_external", "building_features": "insulated_without_towel_rails"}
+        invalid = asyncio.run(flow.async_step_rate_auto({"heating_system": "bad", "building_features": "bad"}))
+        assert invalid["errors"] == {"base": "invalid_selection"}
+        manager.async_update_entry.assert_not_called()
+        result = asyncio.run(flow.async_step_rate_auto({
+            "heating_system": "closed_external", "building_features": "insulated_without_towel_rails",
+        }))
+        assert result["step_id"] == "rate_confirm"
+        assert result["description_placeholders"] == {"rate": "0.05775"}
+        manager.async_update_entry.assert_not_called()
+        manager.async_schedule_reload.assert_not_called()
+        result = asyncio.run(flow.async_step_rate_confirm({}))
+
+    assert result == {"reason": "reconfigure_successful"}
+    manager.async_update_entry.assert_called_once()
+    updated_options = manager.async_update_entry.call_args.kwargs["options"]
+    assert updated_options["other"] == 42
+    assert updated_options["rate_type"] == rate_type
+    assert updated_options["water_heating_rate"] == {"none": None, "manual": 0.05, "auto": 0.05775}[rate_type]
+    assert entry.options == existing_options
     manager.async_schedule_reload.assert_called_once_with("entry-1")
 
 
