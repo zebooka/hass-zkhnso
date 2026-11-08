@@ -26,8 +26,9 @@ ELECTRIC_UNITS = {"кВтч", "кВт·ч", "кВт⋅ч", "kWh"}
 HEAT_UNITS = {"Гкал", "Gcal"}
 WASTE_WATER_TARIFFS = ["ВОДООТВЕДЕНИЕ", "ОТВЕД. СТОЧ. ВОД СОИ"]
 COLD_WATER_TARIFFS = ["ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ", "ХВ НА СОД-Е ОБЩ.ИМУЩ."]
-HOT_WATER_TARIFFS = []
-HOT_WATER_HEATING_TARIFFS = []
+HOT_WATER_TARIFFS = ["ГОРЯЧЕЕ ВОДОСНАБЖЕНИЕ", "ГВ НА СОД-Е ОБЩ.ИМУЩ."]
+HOT_WATER_HEATING_TARIFFS = ["ГОРЯЧЕЕ ВОДОСНАБЖЕНИЕ (ПОДОГРЕВ)", "ГВ НА СОИ (ПОДОГРЕВ)", "ОТОПЛЕНИЕ"]
+HOT_WATER_FLUID_TARIFFS = ["ГОРЯЧЕЕ ВОДОСНАБЖЕНИЕ (ТЕПЛОНОСИТ)", "ГВ НА СОИ (ТЕПЛОНОСИТ)", "ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ", "ХВ НА СОД-Е ОБЩ.ИМУЩ."]
 PARALLEL_UPDATES = 0
 
 
@@ -70,6 +71,7 @@ async def async_setup_entry(
             ]
             tariff_entities.append(ZKHCombinedColdWaterTariffSensor(coordinator))
             _LOGGER.info("Configured water heating rate: %s Gcal/m³", entry.options.get(CONF_WATER_HEATING_RATE))
+            tariff_entities.append(ZKHCombinedHotWaterTariffSensor(coordinator, entry.options.get(CONF_WATER_HEATING_RATE)))
             entities.extend(tariff_entities)
             _LOGGER.info("Created %d tariff sensors", len(tariff_entities))
         else:
@@ -252,9 +254,9 @@ class ZKHCombinedTariffSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def _waste_water(self) -> dict[str, Any] | None:
-        return self._get_first_available_tariff(WASTE_WATER_TARIFFS)
+        return self._get_first_available_tariff(WASTE_WATER_TARIFFS, VOLUME_UNITS)
 
-    def _get_first_available_tariff(self, names: list[str]) -> dict[str, Any] | None:
+    def _get_first_available_tariff(self, names: list[str], units: set[str]) -> dict[str, Any] | None:
         """Return the first tariff with a value, in the given name order."""
         data = self.coordinator.data
         tariffs = data.get("tariffs") if isinstance(data, dict) else None
@@ -267,7 +269,7 @@ class ZKHCombinedTariffSensor(CoordinatorEntity, SensorEntity):
                     isinstance(tariff, dict)
                     and tariff.get("name") == name
                     and tariff.get("rate_per_unit") is not None
-                    and tariff.get("unit") in VOLUME_UNITS
+                    and tariff.get("unit") in units
                 ):
                     return tariff
         return None
@@ -283,7 +285,7 @@ class ZKHCombinedColdWaterTariffSensor(ZKHCombinedTariffSensor):
 
     @property
     def _cold_water(self) -> dict[str, Any] | None:
-        return self._get_first_available_tariff(COLD_WATER_TARIFFS)
+        return self._get_first_available_tariff(COLD_WATER_TARIFFS, VOLUME_UNITS)
 
     @property
     def native_value(self) -> float | None:
@@ -313,7 +315,74 @@ class ZKHCombinedHotWaterTariffSensor(ZKHCombinedTariffSensor):
     """Representation of a ZKH combined hot water tariff sensor."""
     def __init__(
         self,
-        coordinator: ZKHDataUpdateCoordinator
+        coordinator: ZKHDataUpdateCoordinator,
+        water_heating_rate: float | None,
     ) -> None:
         """Initialize the tariff sensor."""
         super().__init__(coordinator, "ГОРЯЧЕЕ ВОДОСНАБЖЕНИЕ")
+        self._water_heating_rate = water_heating_rate
+
+    @property
+    def _hot_water(self) -> dict[str, Any] | None:
+        return self._get_first_available_tariff(HOT_WATER_TARIFFS, VOLUME_UNITS)
+
+    @property
+    def _hot_water_heating(self) -> dict[str, Any] | None:
+        return self._get_first_available_tariff(HOT_WATER_HEATING_TARIFFS, HEAT_UNITS)
+
+    @property
+    def _hot_water_fluid(self) -> dict[str, Any] | None:
+        return self._get_first_available_tariff(HOT_WATER_FLUID_TARIFFS, VOLUME_UNITS)
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the combined hot water tariff value."""
+        waste_water = self._waste_water
+        if waste_water is None:
+            return None
+
+        hot_water = self._hot_water
+        if hot_water is not None:
+            return waste_water.get("rate_per_unit") + hot_water.get("rate_per_unit")
+
+        if self._water_heating_rate is None:
+            return None
+
+        hot_water_heating = self._hot_water_heating
+        hot_water_fluid = self._hot_water_fluid
+        if hot_water_heating is not None and hot_water_fluid is not None:
+            return round(waste_water.get("rate_per_unit") + hot_water_fluid.get("rate_per_unit")
+                         + self._water_heating_rate * hot_water_heating.get("rate_per_unit"), 2)
+
+        return None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return  the combined hot water tariff attributes."""
+        waste_water = self._waste_water
+        if waste_water is None:
+            return {}
+
+        dates = [waste_water.get("from_date")]
+        hot_water = self._hot_water
+        if hot_water is not None:
+            dates.append(hot_water.get("from_date"))
+            return {
+                "names": [waste_water.get("name"), hot_water.get("name")],
+                "from_date": max((date for date in dates if date is not None), default=None),
+            }
+
+        if self._water_heating_rate is None:
+            return {}
+
+        hot_water_heating = self._hot_water_heating
+        hot_water_fluid = self._hot_water_fluid
+        if hot_water_heating is not None and hot_water_fluid is not None:
+            dates.append(hot_water_fluid.get("from_date"))
+            dates.append(hot_water_heating.get("from_date"))
+            return {
+                "names": [waste_water.get("name"), hot_water_fluid.get("name"), hot_water_heating.get("name")],
+                "from_date": max((date for date in dates if date is not None), default=None),
+            }
+
+        return {}
