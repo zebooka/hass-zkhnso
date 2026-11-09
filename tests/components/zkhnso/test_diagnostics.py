@@ -8,8 +8,6 @@ from custom_components.zkhnso.diagnostics import async_get_config_entry_diagnost
 def test_diagnostics_redacts_personal_and_session_data() -> None:
     """Personal information and credentials are hidden in diagnostics."""
     secrets = {
-        "account_id": "1234567890",
-        "address": "Private address",
         "username": "private-user",
         "password": "private-password",
         "JSESSIONID": "session-id",
@@ -18,7 +16,7 @@ def test_diagnostics_redacts_personal_and_session_data() -> None:
     }
     entry = SimpleNamespace(
         data={**secrets, "public": "visible"},
-        options={"account_id": "another-account", "address": "another-address"},
+        options={},
         version=1,
     )
 
@@ -29,7 +27,5 @@ def test_diagnostics_redacts_personal_and_session_data() -> None:
         "public": "visible",
     }
     assert result["entry"]["options"] == {
-        "account_id": "**REDACTED**",
-        "address": "**REDACTED**",
     }
     assert result["entry"]["version"] == 1

@@ -138,6 +138,70 @@ def test_coordinator_returns_meter_and_tariff_containers(monkeypatch) -> None:
     assert client.switched == ["43"]
 
 
+def test_accounts_are_processed_sequentially_on_initial_and_repeated_refresh(monkeypatch) -> None:
+    """A slow tariff response must finish before switching to another account."""
+    import custom_components.zkhnso.coordinator as coordinator_module
+
+    async def run():
+        events = []
+        tariff_started = asyncio.Event()
+        release_tariff = asyncio.Event()
+
+        class SequentialClient(_Client):
+            accounts = {"42": "Адрес 1", "43": "Адрес 2", "44": "Адрес 3"}
+
+            async def change_account(self, account_id):
+                events.append(("switch", account_id))
+                await super().change_account(account_id)
+
+            async def get_meters(self):
+                events.append(("meters", self.current_account_id))
+                await asyncio.sleep(0)
+                return await super().get_meters()
+
+            async def get_tariffs(self):
+                account_id = self.current_account_id
+                events.append(("tariffs_start", account_id))
+                if account_id == "42":
+                    tariff_started.set()
+                    await release_tariff.wait()
+                await asyncio.sleep(0)
+                events.append(("tariffs_end", self.current_account_id))
+                return await super().get_tariffs()
+
+        monkeypatch.setattr(coordinator_module, "ZKHAPIClient", lambda *_: SequentialClient())
+        coordinator = object.__new__(ZKHDataUpdateCoordinator)
+        coordinator.entry = SimpleNamespace(data={"username": "user", "password": "pass"})
+
+        for _ in range(2):
+            events.clear()
+            tariff_started.clear()
+            release_tariff.clear()
+            update = asyncio.create_task(coordinator._async_update_data())
+            try:
+                await asyncio.wait_for(tariff_started.wait(), timeout=2)
+                await asyncio.sleep(0)
+                assert events == [("meters", "42"), ("tariffs_start", "42")]
+                release_tariff.set()
+                result = await asyncio.wait_for(update, timeout=2)
+            finally:
+                if not update.done():
+                    update.cancel()
+                    await asyncio.gather(update, return_exceptions=True)
+
+            assert events == [
+                ("meters", "42"), ("tariffs_start", "42"), ("tariffs_end", "42"),
+                ("switch", "43"), ("meters", "43"), ("tariffs_start", "43"), ("tariffs_end", "43"),
+                ("switch", "44"), ("meters", "44"), ("tariffs_start", "44"), ("tariffs_end", "44"),
+            ]
+            for account_id in ("42", "43", "44"):
+                account = result["accounts"][account_id]
+                assert account["meters"]["serial"]["value"] == int(account_id)
+                assert account["tariffs"]["Water"]["rate_per_unit"] == int(account_id)
+
+    asyncio.run(run())
+
+
 def test_coordinator_fails_when_switch_fails(monkeypatch) -> None:
     import custom_components.zkhnso.coordinator as coordinator_module
 
