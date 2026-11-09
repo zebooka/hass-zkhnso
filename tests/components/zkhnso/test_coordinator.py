@@ -13,17 +13,15 @@ from custom_components.zkhnso.coordinator import ZKHDataUpdateCoordinator
 class _Client:
     """Successful API client test double."""
 
-    account_id = 42
-    address = "Адрес 1"
+    current_account_id = "42"
     accounts = {"42": "Адрес 1", "43": "Адрес 2"}
 
     def __init__(self):
-        self.current = "42"
         self.switched = []
 
     async def change_account(self, account_id):
         self.switched.append(account_id)
-        self.current = account_id
+        self.current_account_id = account_id
 
     async def __aenter__(self):
         return self
@@ -38,10 +36,10 @@ class _Client:
         return True
 
     async def get_meters(self):
-        return {"serial": {"value": int(self.current)}}
+        return {"serial": {"value": int(self.current_account_id)}}
 
     async def get_tariffs(self):
-        return {"Water": {"rate_per_unit": int(self.current)}}
+        return {"Water": {"rate_per_unit": int(self.current_account_id)}}
 
 
 def test_coordinator_returns_meter_and_tariff_containers(monkeypatch) -> None:
@@ -80,16 +78,14 @@ def test_coordinator_uses_current_account_before_switching(monkeypatch) -> None:
     import custom_components.zkhnso.coordinator as coordinator_module
 
     client = _Client()
-    client.account_id = 43
-    client.address = "Адрес 2"
-    client.current = "43"
+    client.current_account_id = "42"
     monkeypatch.setattr(coordinator_module, "ZKHAPIClient", lambda *_: client)
     coordinator = object.__new__(ZKHDataUpdateCoordinator)
     coordinator.entry = SimpleNamespace(data={"username": "user", "password": "pass"})
     data = asyncio.run(coordinator._async_update_data())
     assert data["accounts"]["43"]["meters"]["serial"]["value"] == 43
     assert data["accounts"]["42"]["meters"]["serial"]["value"] == 42
-    assert client.switched == ["42"]
+    assert client.switched == ["43"]
 
 
 @pytest.mark.parametrize("failed_method", ["get_meters", "get_tariffs"])
@@ -98,7 +94,7 @@ def test_coordinator_rejects_partial_account_data(monkeypatch, failed_method) ->
 
     client = _Client()
     async def fetch():
-        return None if client.current == "43" else {}
+        return None if client.current_account_id == "43" else {}
     setattr(client, failed_method, fetch)
     monkeypatch.setattr(coordinator_module, "ZKHAPIClient", lambda *_: client)
     coordinator = object.__new__(ZKHDataUpdateCoordinator)

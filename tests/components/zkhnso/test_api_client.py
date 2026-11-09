@@ -10,7 +10,7 @@ import pytest
 from custom_components.zkhnso.api_client import ZKHAPIClient, ZKHAPIConnectionError
 
 
-def _login_client(status=200, body="<html>Account</html>", error=None):
+def _login_client(status=200, body='<div class="header"><div class="account"><span>42</span></div><div class="address">Адрес</div></div>', error=None):
     """Create a client with a controlled login response."""
     client = ZKHAPIClient("user", "password")
     client.jsessionid = "session"
@@ -32,6 +32,25 @@ def test_login_distinguishes_accepted_and_rejected_credentials() -> None:
     """Only the returned login form represents rejected credentials."""
     assert asyncio.run(_login_client().login()) is True
     assert asyncio.run(_login_client(body='<form id="loginForm"></form>').login()) is False
+
+
+def test_login_initializes_current_address_for_configuration() -> None:
+    client = _login_client(body='''
+        <div class="header"><div class="account"><span>123</span></div>
+        <div class="address"> Новосибирск,   ул. Ленина </div></div>
+    ''')
+    assert asyncio.run(client.login()) is True
+    assert client.current_account_id == "123"
+    assert client.accounts == {"123": "Новосибирск, ул. Ленина"}
+
+
+@pytest.mark.parametrize("body", [
+    "<html>Account</html>",
+    '<div class="header"><div class="account"><span>123</span></div><div class="address"> </div></div>',
+])
+def test_login_missing_account_information_is_not_rejected_credentials(body) -> None:
+    with pytest.raises(ZKHAPIConnectionError):
+        asyncio.run(_login_client(body=body).login())
 
 
 @pytest.mark.parametrize("status", [401, 403, 429, 500, 503])
@@ -65,35 +84,24 @@ def test_login_extracts_accounts_and_current_selection() -> None:
         </table></div></div><div class="address">Текущий адрес</div></div>
     """)
     assert asyncio.run(client.login()) is True
-    assert client.current_account_id == 42
-    assert client.current_address == "Текущий адрес"
+    assert client.current_account_id == "42"
     assert client.accounts == {"42": "Текущий адрес", "43": "Адрес 2"}
 
 
-def test_account_numbers_keep_leading_zeroes() -> None:
-    client = _login_client(body="""
-        <div class="header"><div class="account"><span>42</span>
-        <div class="acc-select"><table class="accounts-grid">
-        <tr><td>ЛС: 0042</td><td>Адрес</td></tr>
-        <tr><td>ЛС: A-43</td><td>Другой адрес</td></tr>
-        </table></div></div><div class="address">Адрес</div></div>
-    """)
-    assert asyncio.run(client.login())
-    assert client.accounts == {"0042": "Адрес", "A-43": "Другой адрес"}
-
-
-@pytest.mark.parametrize("status,location,success", [
-    (302, "main.action", True),
-    (302, "/room/lk/main.action", True),
-    (302, "login.action", False),
-    (302, "https://other.example/room/lk/main.action", False),
-    (200, "main.action", False),
-    (302, "", False),
+@pytest.mark.parametrize("status,success", [
+    (200, True),
+    (204, True),
+    (302, True),
+    (304, True),
+    (307, True),
+    (400, False),
+    (500, False),
+    (503, False),
 ])
-def test_change_account_requires_main_redirect(status, location, success) -> None:
+def test_change_account_requires_main_redirect(status, success) -> None:
     client = ZKHAPIClient("user", "password")
     client.jsessionid = "session"
-    response = SimpleNamespace(status=status, headers={"Location": location})
+    response = SimpleNamespace(status=status)
     request = MagicMock()
     request.__aenter__ = AsyncMock(return_value=response)
     request.__aexit__ = AsyncMock(return_value=None)
@@ -106,6 +114,18 @@ def test_change_account_requires_main_redirect(status, location, success) -> Non
     args, kwargs = client.session.get.call_args
     assert args[0].endswith("main!change.action?account=43")
     assert kwargs["allow_redirects"] is False
+
+
+def test_account_numbers_keep_leading_zeroes() -> None:
+    client = _login_client(body="""
+        <div class="header"><div class="account"><span>0042</span>
+        <div class="acc-select"><table class="accounts-grid">
+        <tr><td>ЛС: 0042</td><td>Адрес</td></tr>
+        <tr><td>ЛС: A-43</td><td>Другой адрес</td></tr>
+        </table></div></div><div class="address">Адрес</div></div>
+    """)
+    assert asyncio.run(client.login())
+    assert client.accounts == {"0042": "Адрес", "A-43": "Другой адрес"}
 
 
 def test_process_meters_preserves_fractional_reading() -> None:

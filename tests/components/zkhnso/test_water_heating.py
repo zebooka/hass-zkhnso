@@ -265,7 +265,7 @@ def test_sensor_setup_with_configured_rate():
     )
     entry.runtime_data = SimpleNamespace(
         entry=entry,
-        data={"tariffs": {"water": {"name": "Water", "unit": "куб.м.", "rate_per_unit": 50.25}}},
+        data={"accounts": {"42": {"address": "Адрес", "tariffs": {"water": {"name": "Water", "unit": "куб.м.", "rate_per_unit": 50.25}}}}},
     )
     add_entities = MagicMock()
     asyncio.run(async_setup_entry(None, entry, add_entities))

@@ -21,7 +21,6 @@ class ZKHDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Fetch meter and tariff data from the ZKHNSO personal account."""
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
-        """Initialize the coordinator."""
         super().__init__(
             hass,
             _LOGGER,
@@ -43,8 +42,8 @@ class ZKHDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if not logged_in:
                 raise ConfigEntryAuthFailed("Invalid ZKHNSO credentials")
 
-            if client.current_account_id is None or not client.current_address:
-                raise UpdateFailed("Failed to identify the current ZKHNSO account")
+            if client.current_account_id is None:
+                raise UpdateFailed("Failed to identify current ZKHNSO account")
 
             accounts = {}
             for account_id, address in client.accounts.items():

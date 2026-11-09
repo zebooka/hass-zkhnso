@@ -40,7 +40,6 @@ class ZKHAPIClient:
         self.session: aiohttp.ClientSession | None = None
         self.jsessionid: str | None = None
         self.form_token: str | None = None
-        self.current_address: str | None = None
         self.current_account_id: str | None = None
         self.accounts: dict[str, str] = {}
 
@@ -197,12 +196,14 @@ class ZKHAPIClient:
                     current_account_id = html_to_json_simple(response_text, ".header .account span")
                     current_address = html_to_json_simple(response_text, ".header .address")
                     if not isinstance(current_account_id, str) or not isinstance(current_address, str):
-                        _LOGGER.error("Login was accepted, put page contains no current account information")
-                        return False
+                        raise ZKHAPIConnectionError("Login page has no current account information")
 
-                    self.current_account_id = " ".join(current_account_id.split()) or None
-                    if self.current_account_id is not None:
-                        self.accounts[self.current_account_id] = " ".join(current_address.split())
+                    current_account_id = " ".join(current_account_id.split()) or None
+                    current_address = " ".join(current_address.split()) or None
+                    if current_account_id is None or current_address is None:
+                        raise ZKHAPIConnectionError("Login page has incomplete account information")
+                    self.current_account_id = current_account_id
+                    self.accounts[current_account_id] = current_address
 
                     rows = extract_table_rows_with_children(
                         response_text, ".header .account .acc-select .accounts-grid tr"
@@ -212,7 +213,7 @@ class ZKHAPIClient:
                             continue
                         account_id = row[0].strip().removeprefix("ЛС:").strip() or None
                         address = " ".join(row[1].split()) or None
-                        if account_id is not None and address is not None:
+                        if account_id is not None and address is not None and account_id != self.current_account_id:
                             self.accounts[account_id] = address
 
                     _LOGGER.debug("Login response accepted")
@@ -241,11 +242,8 @@ class ZKHAPIClient:
                 headers={"Referer": urljoin(API_BASE_URL, API_URL_MAIN)},
                 cookies=self._get_authenticated_cookies(),
             ) as response:
-                location = response.headers.get("Location", "")
-                target = urlsplit(urljoin(url, location))
-                expected = urlsplit(urljoin(API_BASE_URL, API_URL_MAIN))
-                if response.status >= 400 or not location or (target.scheme, target.netloc, target.path) != (expected.scheme, expected.netloc, expected.path):
-                    raise ZKHAPIConnectionError("Account switch returned an unexpected response")
+                if response.status >= 400:
+                    raise ZKHAPIConnectionError(f"Account switch returned an unexpected response {response.status}")
                 self.current_account_id = account_id
         except ZKHAPIConnectionError:
             raise

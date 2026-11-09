@@ -45,7 +45,7 @@ async def async_setup_entry(
     known: set[tuple[str, str, str]] = set()
 
     def add_new_sensors() -> None:
-        accounts = coordinator.data.get("accounts") if coordinator.data is dict else {}
+        accounts = coordinator.data.get("accounts", {}) if isinstance(coordinator.data, dict) else {}
         entities = []
         for account_id, account in accounts.items():
             for kind, cls in (("meters", ZKHMeterSensor), ("tariffs", ZKHTariffSensor)):
@@ -85,17 +85,21 @@ class ZKHSensor(CoordinatorEntity, SensorEntity):
         if not self.coordinator.data:
             return None
 
-        return self.coordinator.data.get("accounts", {}).get(self.account_id, {}) or None
+        return self.coordinator.data.get("accounts", {}).get(self._account_id, {}) or None
 
     @property
     def _id_prefix(self) -> str:
-        return f"{self.coordinator.entry.entry_id}_account_{self._account_id}"
+        entry = self.coordinator.entry
+        saved = str(entry.data.get(CONF_ACCOUNT_ID))
+        if self._account_id == saved or (self._account_id.isdecimal() and saved.isdecimal() and int(self._account_id) == int(saved)):
+            return entry.entry_id
+        return f"{entry.entry_id}_account_{self._account_id}"
 
     @property
     def device_info(self) -> DeviceInfo:
         return DeviceInfo(
             identifiers={(DOMAIN, self._id_prefix)},
-            name=f"№{self._account_id} {self._account.get('address')}".strip(),
+            name=f"№{self._account_id} {(self._account or {}).get('address', '')}".strip(),
         )
 
 
@@ -175,7 +179,7 @@ class ZKHTariffSensor(ZKHSensor):
         self._attr_translation_key = "tariff"
         self._attr_translation_placeholders = {
             "name": str(tariff.get("name", key)),
-            "account_id": self.account_id,
+            "account_id": self._account_id,
         }
         self._attr_native_unit_of_measurement = self._normalized_unit(tariff.get("unit"))
         self._attr_icon = "mdi:currency-rub"
@@ -227,7 +231,7 @@ class ZKHCombinedTariffSensor(ZKHSensor):
         self._attr_translation_key = "combined_tariff"
         self._attr_translation_placeholders = {
             "name": str(name),
-            "account_id": self.account_id,
+            "account_id": self._account_id,
         }
         self._attr_native_unit_of_measurement = f"RUB/{UnitOfVolume.CUBIC_METERS}"
         self._attr_icon = "mdi:sigma"

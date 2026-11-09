@@ -22,6 +22,8 @@ from custom_components.zkhnso.sensor import (
 
 def _coordinator(data: dict) -> SimpleNamespace:
     """Create the coordinator shape used by entity unit tests."""
+    if data is not None and "accounts" not in data:
+        data = {"accounts": {"42": {"address": "Новосибирск, ул. Ленина, 1", **data}}}
     return SimpleNamespace(
         data=data,
         entry=SimpleNamespace(entry_id="entry", data={"account_id": 42, "address": "Новосибирск, ул. Ленина, 1", "username": "user"}),
@@ -47,7 +49,7 @@ def test_entry_sensors_share_device_and_keep_unique_ids() -> None:
     for entity in entities:
         assert entity.device_info == {
             "identifiers": {("zkhnso", "entry")},
-            "name": " №42 Новосибирск, ул. Ленина, 1",
+            "name": "№42 Новосибирск, ул. Ленина, 1",
         }
         assert entity.has_entity_name is True
 
@@ -57,8 +59,8 @@ def test_different_entries_have_separate_devices() -> None:
     first = _coordinator({})
     second = _coordinator({})
     second.entry.entry_id = "another-entry"
-    first_sensor = ZKHCombinedColdWaterTariffSensor(first)
-    second_sensor = ZKHCombinedColdWaterTariffSensor(second)
+    first_sensor = ZKHCombinedColdWaterTariffSensor(first, "42")
+    second_sensor = ZKHCombinedColdWaterTariffSensor(second, "42")
     assert first_sensor.device_info["identifiers"] == {("zkhnso", "entry")}
     assert second_sensor.device_info["identifiers"] == {("zkhnso", "another-entry")}
     assert first_sensor.unique_id != second_sensor.unique_id
@@ -78,18 +80,18 @@ def test_multiple_accounts_are_isolated_and_new_accounts_are_discovered() -> Non
     entities = add_entities.call_args.args[0]
     assert len(entities) == 8
     assert len({entity.unique_id for entity in entities}) == 8
-    meters = {entity.account_id: entity for entity in entities if isinstance(entity, ZKHMeterSensor)}
-    tariffs = {entity.account_id: entity for entity in entities if isinstance(entity, ZKHTariffSensor)}
+    meters = {entity._account_id: entity for entity in entities if isinstance(entity, ZKHMeterSensor)}
+    tariffs = {entity._account_id: entity for entity in entities if isinstance(entity, ZKHTariffSensor)}
     assert meters["42"].unique_id == "entry_meter_1"
     assert meters["43"].unique_id == "entry_account_43_meter_1"
-    assert meters["42"].device_info == {"identifiers": {("zkhnso", "entry")}, "name": " №42 Адрес 1"}
-    assert meters["43"].device_info == {"identifiers": {("zkhnso", "entry_account_43")}, "name": " №43 Адрес 2"}
+    assert meters["42"].device_info == {"identifiers": {("zkhnso", "entry")}, "name": "№42 Адрес 1"}
+    assert meters["43"].device_info == {"identifiers": {("zkhnso", "entry_account_43")}, "name": "№43 Адрес 2"}
     assert (meters["42"].native_value, meters["43"].native_value) == (10, 30)
     assert (tariffs["42"].native_value, tariffs["43"].native_value) == (20, 40)
     coordinator.data["accounts"]["43"] = account("Новый адрес", 31, 41)
     assert meters["43"].native_value == 31
     assert tariffs["43"].native_value == 41
-    assert meters["43"].device_info["name"] == " №43 Новый адрес"
+    assert meters["43"].device_info["name"] == "№43 Новый адрес"
     coordinator.data["accounts"]["44"] = account("Адрес 3", 50, 60)
     listener[0]()
     assert len(add_entities.call_args.args[0]) == 4
@@ -104,8 +106,8 @@ def test_combined_tariffs_use_only_their_own_account() -> None:
         "42": {"address": "Первый", "tariffs": {"w": _tariff("ВОДООТВЕДЕНИЕ", 5), "c": _tariff("ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ", 10)}},
         "43": {"address": "Второй", "tariffs": {"w": _tariff("ВОДООТВЕДЕНИЕ", 20), "c": _tariff("ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ", 30)}},
     }})
-    first = ZKHCombinedColdWaterTariffSensor(coordinator, "42", "Первый")
-    second = ZKHCombinedColdWaterTariffSensor(coordinator, "43", "Второй")
+    first = ZKHCombinedColdWaterTariffSensor(coordinator, "42")
+    second = ZKHCombinedColdWaterTariffSensor(coordinator, "43")
     assert first.native_value == 15
     assert second.native_value == 50
     del coordinator.data["accounts"]["43"]
@@ -114,29 +116,30 @@ def test_combined_tariffs_use_only_their_own_account() -> None:
 
 def test_leading_zeroes_keep_existing_account_ids() -> None:
     coordinator = _coordinator({"accounts": {"0042": {"address": "Адрес", "meters": {}}}})
-    sensor = ZKHMeterSensor(coordinator, "1", {}, "0042", "Адрес")
+    sensor = ZKHMeterSensor(coordinator, "1", {}, "0042")
     assert sensor.unique_id == "entry_meter_1"
     assert sensor.device_info["identifiers"] == {("zkhnso", "entry")}
 
 
 @pytest.mark.parametrize("data,expected", [
-    ({"account_id": 123, "address": "Адрес"}, " №123 Адрес"),
-    ({"account_id": 0, "address": " Адрес "}, " №0  Адрес "),
+    ({"account_id": 123, "address": "Адрес"}, "№123 Адрес"),
+    ({"account_id": 0, "address": " Адрес "}, "№0  Адрес"),
 ])
 def test_device_name_uses_account_details(data, expected) -> None:
     """The device name includes the account number and address as supplied."""
-    coordinator = _coordinator({})
+    account_id = str(data["account_id"])
+    coordinator = _coordinator({"accounts": {account_id: {"address": data["address"]}}})
     coordinator.entry.data = data
-    sensor = ZKHCombinedColdWaterTariffSensor(coordinator)
+    sensor = ZKHCombinedColdWaterTariffSensor(coordinator, account_id)
     assert sensor.device_info["name"] == expected
     assert sensor.device_info["identifiers"] == {("zkhnso", "entry")}
 
 
 def test_device_name_reflects_updated_account_details() -> None:
     coordinator = _coordinator({})
-    sensor = ZKHCombinedColdWaterTariffSensor(coordinator)
-    coordinator.entry.data = {"account_id": 42, "address": "Новый адрес"}
-    assert sensor.device_info["name"] == " №42 Новый адрес"
+    sensor = ZKHCombinedColdWaterTariffSensor(coordinator, "42")
+    coordinator.data["accounts"]["42"]["address"] = "Новый адрес"
+    assert sensor.device_info["name"] == "№42 Новый адрес"
     assert sensor.device_info["identifiers"] == {("zkhnso", "entry")}
 
 
@@ -144,13 +147,13 @@ def test_meter_uses_current_coordinator_data_and_clears_removed_meter() -> None:
     """Meters do not retain stale readings after a successful refresh."""
     data = {"meters": {"1": {"name": "Вода", "unit": "куб.м.", "value": 12.5}}}
     coordinator = _coordinator(data)
-    sensor = ZKHMeterSensor(coordinator, "1", data["meters"]["1"])
+    sensor = ZKHMeterSensor(coordinator, "1", data["meters"]["1"], "42")
 
     assert sensor.native_value == 12.5
     assert sensor.device_class == SensorDeviceClass.WATER
     assert sensor.native_unit_of_measurement == UnitOfVolume.CUBIC_METERS
 
-    coordinator.data = {"meters": {}}
+    coordinator.data["accounts"]["42"]["meters"] = {}
     assert sensor.native_value is None
     assert sensor.extra_state_attributes == {}
 
@@ -164,7 +167,7 @@ def test_meter_device_classes() -> None:
     ]
     for index, (name, unit, device_class, native_unit) in enumerate(cases):
         meter = {"name": name, "unit": unit, "value": 1}
-        sensor = ZKHMeterSensor(_coordinator({"meters": {str(index): meter}}), str(index), meter)
+        sensor = ZKHMeterSensor(_coordinator({"meters": {str(index): meter}}), str(index), meter, "42")
         assert sensor.device_class == device_class
         assert sensor.native_unit_of_measurement == native_unit
 
@@ -173,13 +176,13 @@ def test_tariff_uses_current_data_and_clears_removed_tariff() -> None:
     """Tariffs use `rate_per_unit` and clear stale state when removed."""
     tariff = {"name": "Water", "unit": "куб.м.", "rate_per_unit": 50.25, "norm": 3, "from_date": "2026-01-01"}
     coordinator = _coordinator({"tariffs": {"Water": tariff}})
-    sensor = ZKHTariffSensor(coordinator, "Water", tariff)
+    sensor = ZKHTariffSensor(coordinator, "Water", tariff, "42")
 
     assert sensor.native_value == 50.25
     assert sensor.device_class is None
     assert sensor.native_unit_of_measurement == "RUB/m³"
 
-    coordinator.data = {"tariffs": {}}
+    coordinator.data["accounts"]["42"]["tariffs"] = {}
     assert sensor.native_value is None
     assert sensor.extra_state_attributes == {}
 
@@ -197,7 +200,7 @@ def test_tariff_price_units_match_resource_units() -> None:
         sensor = ZKHTariffSensor(
             _coordinator({"tariffs": {str(index): tariff}}),
             str(index),
-            tariff,
+            tariff, "42",
         )
         assert sensor.device_class is None
         assert sensor.native_unit_of_measurement == expected_unit
@@ -209,7 +212,7 @@ def test_combined_tariff_search_uses_name_and_priority(sensor_type) -> None:
     first = {"name": "ОТВЕД. СТОЧ. ВОД СОИ", "rate_per_unit": 12.5, "unit": "куб.м."}
     second = {"name": "ВОДООТВЕДЕНИЕ", "rate_per_unit": 8.0, "unit": "куб.м."}
     coordinator = _coordinator({"tariffs": {"ОТВЕД. СТОЧ. ВОД СОИ": second, "other": first}})
-    sensor = sensor_type(coordinator, 0.05) if sensor_type is ZKHCombinedHotWaterTariffSensor else sensor_type(coordinator)
+    sensor = sensor_type(coordinator, 0.05, "42") if sensor_type is ZKHCombinedHotWaterTariffSensor else sensor_type(coordinator, "42")
     names = ["ОТВЕД. СТОЧ. ВОД СОИ", "ВОДООТВЕДЕНИЕ"]
 
     assert sensor._get_first_available_tariff(names, VOLUME_UNITS) is first
@@ -223,15 +226,15 @@ def test_combined_tariff_search_uses_name_and_priority(sensor_type) -> None:
     second["rate_per_unit"] = 0
     assert sensor._get_first_available_tariff(names, VOLUME_UNITS) is second
 
-    coordinator.data = {"tariffs": {"new": {"name": names[0], "rate_per_unit": 15, "unit": "куб.м."}}}
-    assert sensor._get_first_available_tariff(names, VOLUME_UNITS) == coordinator.data["tariffs"]["new"]
+    coordinator.data["accounts"]["42"]["tariffs"] = {"new": {"name": names[0], "rate_per_unit": 15, "unit": "куб.м."}}
+    assert sensor._get_first_available_tariff(names, VOLUME_UNITS) == coordinator.data["accounts"]["42"]["tariffs"]["new"]
     assert sensor._get_first_available_tariff([names[1]], VOLUME_UNITS) is None
 
 
 @pytest.mark.parametrize("data", [None, {}, {"tariffs": None}, {"tariffs": []}, {"tariffs": {"x": None, "y": {"name": "X"}}}])
 def test_combined_tariff_search_handles_missing_data(data) -> None:
     """Missing or incomplete data does not make a tariff available."""
-    sensor = ZKHCombinedColdWaterTariffSensor(_coordinator(data))
+    sensor = ZKHCombinedColdWaterTariffSensor(_coordinator(data), "42")
     assert sensor._get_first_available_tariff(["X"], VOLUME_UNITS) is None
 
 
@@ -240,12 +243,12 @@ def test_combined_tariff_search_skips_unavailable_duplicate() -> None:
     available = {"name": "X", "rate_per_unit": 0, "unit": "куб.м."}
     sensor = ZKHCombinedColdWaterTariffSensor(_coordinator({
         "tariffs": {"first": {"name": "X", "rate_per_unit": None}, "second": available}
-    }))
+    }), "42")
     assert sensor._get_first_available_tariff(["X"], VOLUME_UNITS) is available
 
 
 def test_combined_tariff_sensor_properties() -> None:
-    sensor = ZKHCombinedTariffSensor(_coordinator({}), "Test")
+    sensor = ZKHCombinedTariffSensor(_coordinator({}), "Test", "42")
     assert sensor.unique_id == "entry_combined_tariff_Test"
     assert sensor.translation_key == "combined_tariff"
     assert sensor.translation_placeholders == {"name": "Test", "account_id": "42"}
@@ -256,21 +259,21 @@ def test_combined_tariff_sensor_properties() -> None:
 @pytest.mark.parametrize("unit", ["куб.м.", "куб.м", "м³", "m³"])
 def test_combined_tariff_search_accepts_volume_units(unit) -> None:
     tariff = {"name": "X", "rate_per_unit": 10, "unit": unit}
-    sensor = ZKHCombinedTariffSensor(_coordinator({"tariffs": {"key": tariff}}), "Test")
+    sensor = ZKHCombinedTariffSensor(_coordinator({"tariffs": {"key": tariff}}), "Test", "42")
     assert sensor._get_first_available_tariff(["X"], VOLUME_UNITS) is tariff
 
 
 @pytest.mark.parametrize("unit", [None, "Гкал", "кВтч", "кв.м."])
 def test_combined_tariff_search_rejects_non_volume_units(unit) -> None:
     tariff = {"name": "X", "rate_per_unit": 10, "unit": unit}
-    sensor = ZKHCombinedTariffSensor(_coordinator({"tariffs": {"key": tariff}}), "Test")
+    sensor = ZKHCombinedTariffSensor(_coordinator({"tariffs": {"key": tariff}}), "Test", "42")
     assert sensor._get_first_available_tariff(["X"], VOLUME_UNITS) is None
 
 
 @pytest.mark.parametrize("unit", ["Гкал", "Gcal"])
 def test_combined_tariff_search_accepts_heat_units(unit) -> None:
     tariff = {"name": "X", "rate_per_unit": 10, "unit": unit}
-    sensor = ZKHCombinedTariffSensor(_coordinator({"tariffs": {"key": tariff}}), "Test")
+    sensor = ZKHCombinedTariffSensor(_coordinator({"tariffs": {"key": tariff}}), "Test", "42")
     assert sensor._get_first_available_tariff(["X"], HEAT_UNITS) is tariff
     assert sensor._get_first_available_tariff(["X"], VOLUME_UNITS) is None
 
@@ -284,7 +287,7 @@ def _tariff(name, rate, date=None, unit="куб.м."):
 def test_combined_cold_water_calculates_rate_and_attributes(waste_name, cold_name) -> None:
     waste = _tariff(waste_name, 12.5, "2026-02-01")
     cold = _tariff(cold_name, 30.25, "2026-03-01")
-    sensor = ZKHCombinedColdWaterTariffSensor(_coordinator({"tariffs": {"waste": waste, "cold": cold}}))
+    sensor = ZKHCombinedColdWaterTariffSensor(_coordinator({"tariffs": {"waste": waste, "cold": cold}}), "42")
     assert sensor.native_value == 42.75
     assert sensor.extra_state_attributes == {
         "names": [waste_name, cold_name],
@@ -303,7 +306,7 @@ def test_combined_cold_water_latest_date_and_zero_rate(dates, expected) -> None:
     sensor = ZKHCombinedColdWaterTariffSensor(_coordinator({"tariffs": {
         "waste": _tariff("ВОДООТВЕДЕНИЕ", 0, dates[0]),
         "cold": _tariff("ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ", 10, dates[1]),
-    }}))
+    }}), "42")
     assert sensor.native_value == 10
     assert sensor.extra_state_attributes["from_date"] == expected
 
@@ -316,7 +319,7 @@ def test_combined_cold_water_latest_date_and_zero_rate(dates, expected) -> None:
     {"waste": _tariff("ВОДООТВЕДЕНИЕ", 5), "cold": _tariff("ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ", 10, unit="Гкал")},
 ])
 def test_combined_cold_water_requires_both_available_tariffs(tariffs) -> None:
-    sensor = ZKHCombinedColdWaterTariffSensor(_coordinator({"tariffs": tariffs}))
+    sensor = ZKHCombinedColdWaterTariffSensor(_coordinator({"tariffs": tariffs}), "42")
     assert sensor.native_value is None
     assert sensor.extra_state_attributes == {}
 
@@ -328,14 +331,14 @@ def test_combined_cold_water_priority_and_coordinator_updates() -> None:
         "cold_backup": _tariff("ХВ НА СОД-Е ОБЩ.ИМУЩ.", 11),
         "cold_primary": _tariff("ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ", 10),
     }})
-    sensor = ZKHCombinedColdWaterTariffSensor(coordinator)
+    sensor = ZKHCombinedColdWaterTariffSensor(coordinator, "42")
     assert sensor.native_value == 15
     assert sensor.extra_state_attributes["names"] == ["ВОДООТВЕДЕНИЕ", "ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ"]
-    coordinator.data["tariffs"]["waste_primary"]["rate_per_unit"] = None
-    coordinator.data["tariffs"]["cold_primary"]["rate_per_unit"] = None
+    coordinator.data["accounts"]["42"]["tariffs"]["waste_primary"]["rate_per_unit"] = None
+    coordinator.data["accounts"]["42"]["tariffs"]["cold_primary"]["rate_per_unit"] = None
     assert sensor.native_value == 17
     assert sensor.extra_state_attributes["names"] == ["ОТВЕД. СТОЧ. ВОД СОИ", "ХВ НА СОД-Е ОБЩ.ИМУЩ."]
-    coordinator.data = {"tariffs": {}}
+    coordinator.data["accounts"]["42"]["tariffs"] = {}
     assert sensor.native_value is None
     assert sensor.extra_state_attributes == {}
 
@@ -361,7 +364,7 @@ def test_combined_hot_water_direct_tariff(hot_name) -> None:
         "fluid": _tariff("ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ", 20),
         "heating": _tariff("ОТОПЛЕНИЕ", 1000, unit="Гкал"),
     }})
-    sensor = ZKHCombinedHotWaterTariffSensor(coordinator, None)
+    sensor = ZKHCombinedHotWaterTariffSensor(coordinator, None, "42")
     assert sensor.native_value == 62.5
     assert sensor.extra_state_attributes == {
         "names": ["ВОДООТВЕДЕНИЕ", hot_name],
@@ -380,7 +383,7 @@ def test_combined_hot_water_heating_calculation(heating_name, fluid_name, heat_u
         "fluid": _tariff(fluid_name, 30.25, "2026-02-01"),
         "heating": _tariff(heating_name, 1234.56, "2026-03-01", heat_unit),
     }})
-    sensor = ZKHCombinedHotWaterTariffSensor(coordinator, 0.06528)
+    sensor = ZKHCombinedHotWaterTariffSensor(coordinator, 0.06528, "42")
     assert sensor.native_value == 123.34
     assert sensor.extra_state_attributes == {
         "names": ["ОТВЕД. СТОЧ. ВОД СОИ", fluid_name, heating_name],
@@ -400,7 +403,7 @@ def test_combined_hot_water_zero_rates_and_dates(dates, expected) -> None:
         "fluid": _tariff("ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ", 0, dates[1]),
         "heating": _tariff("ОТОПЛЕНИЕ", 0, dates[2], "Гкал"),
     }})
-    sensor = ZKHCombinedHotWaterTariffSensor(coordinator, 0)
+    sensor = ZKHCombinedHotWaterTariffSensor(coordinator, 0, "42")
     assert sensor.native_value == 0
     assert sensor.extra_state_attributes["from_date"] == expected
 
@@ -412,11 +415,11 @@ def test_combined_hot_water_without_heating_rate() -> None:
         "fluid": _tariff("ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ", 10, "2026-02-01"),
         "heating": _tariff("ОТОПЛЕНИЕ", 1000, "2026-03-01", "Гкал"),
     }})
-    sensor = ZKHCombinedHotWaterTariffSensor(coordinator, None)
+    sensor = ZKHCombinedHotWaterTariffSensor(coordinator, None, "42")
     assert sensor.native_value is None
     assert sensor.extra_state_attributes == {}
 
-    zero_rate_sensor = ZKHCombinedHotWaterTariffSensor(coordinator, 0)
+    zero_rate_sensor = ZKHCombinedHotWaterTariffSensor(coordinator, 0, "42")
     assert zero_rate_sensor.native_value == 15
     assert zero_rate_sensor.extra_state_attributes == {
         "names": ["ВОДООТВЕДЕНИЕ", "ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ", "ОТОПЛЕНИЕ"],
@@ -450,7 +453,7 @@ def test_combined_hot_water_requires_all_components(missing) -> None:
         "heating": _tariff("ОТОПЛЕНИЕ", 1000, unit="Гкал"),
     }
     del tariffs[missing]
-    sensor = ZKHCombinedHotWaterTariffSensor(_coordinator({"tariffs": tariffs}), 0.05)
+    sensor = ZKHCombinedHotWaterTariffSensor(_coordinator({"tariffs": tariffs}), 0.05, "42")
     assert sensor.native_value is None
     assert sensor.extra_state_attributes == {}
 
@@ -463,7 +466,7 @@ def test_combined_hot_water_rejects_wrong_component_units(component, unit) -> No
         "heating": _tariff("ОТОПЛЕНИЕ", 1000, unit="Гкал"),
     }
     tariffs[component]["unit"] = unit
-    sensor = ZKHCombinedHotWaterTariffSensor(_coordinator({"tariffs": tariffs}), 0.05)
+    sensor = ZKHCombinedHotWaterTariffSensor(_coordinator({"tariffs": tariffs}), 0.05, "42")
     assert sensor.native_value is None
     assert sensor.extra_state_attributes == {}
 
@@ -476,16 +479,16 @@ def test_combined_hot_water_priority_and_coordinator_updates() -> None:
         "heat_backup": _tariff("ОТОПЛЕНИЕ", 2000, unit="Гкал"),
         "heat_primary": _tariff("ГОРЯЧЕЕ ВОДОСНАБЖЕНИЕ (ПОДОГРЕВ)", 1000, unit="Гкал"),
     }})
-    sensor = ZKHCombinedHotWaterTariffSensor(coordinator, 0.05)
+    sensor = ZKHCombinedHotWaterTariffSensor(coordinator, 0.05, "42")
     assert sensor.native_value == 75
     assert sensor.extra_state_attributes["names"] == [
         "ВОДООТВЕДЕНИЕ", "ГОРЯЧЕЕ ВОДОСНАБЖЕНИЕ (ТЕПЛОНОСИТ)", "ГОРЯЧЕЕ ВОДОСНАБЖЕНИЕ (ПОДОГРЕВ)"
     ]
-    coordinator.data["tariffs"]["fluid_primary"]["rate_per_unit"] = None
-    coordinator.data["tariffs"]["heat_primary"]["rate_per_unit"] = None
+    coordinator.data["accounts"]["42"]["tariffs"]["fluid_primary"]["rate_per_unit"] = None
+    coordinator.data["accounts"]["42"]["tariffs"]["heat_primary"]["rate_per_unit"] = None
     assert sensor.native_value == 115
     assert sensor.extra_state_attributes["names"] == ["ВОДООТВЕДЕНИЕ", "ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ", "ОТОПЛЕНИЕ"]
-    coordinator.data = {"tariffs": {}}
+    coordinator.data["accounts"]["42"]["tariffs"] = {}
     assert sensor.native_value is None
     assert sensor.extra_state_attributes == {}
 
