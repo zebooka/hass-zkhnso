@@ -16,7 +16,7 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import CONF_ACCOUNT_ID, CONF_ACCOUNT_OPTIONS, CONF_WATER_HEATING_RATE, DOMAIN
+from .const import CONF_ACCOUNT_OPTIONS, CONF_WATER_HEATING_RATE, DOMAIN
 from .coordinator import ZKHDataUpdateCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -90,11 +90,7 @@ class ZKHSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def _id_prefix(self) -> str:
-        entry = self.coordinator.entry
-        saved = str(entry.data.get(CONF_ACCOUNT_ID))
-        if self._account_id == saved or (self._account_id.isdecimal() and saved.isdecimal() and int(self._account_id) == int(saved)):
-            return entry.entry_id
-        return f"{entry.entry_id}_account_{self._account_id}"
+        return f"{self.coordinator.entry.entry_id}_account_{self._account_id}"
 
     @property
     def device_info(self) -> DeviceInfo:

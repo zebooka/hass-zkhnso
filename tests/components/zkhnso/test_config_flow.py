@@ -100,7 +100,7 @@ def test_reconfigure_form_does_not_expose_password(monkeypatch) -> None:
 def test_reconfigure_updates_credentials_and_preserves_options(monkeypatch) -> None:
     import custom_components.zkhnso.config_flow as flow_module
 
-    options = {"account_options": {"123": {"water_heating_rate": 0.05}}}
+    options = {"account_options": {"123": {"water_heating_rate": 0.05, "extra": 1}}, "other": 5}
     flow, entry, manager = _reconfigure_flow(monkeypatch, options=options)
     monkeypatch.setattr(flow_module, "validate_input", AsyncMock(return_value={"username": "New-User", "title": "New-User"}))
     result = asyncio.run(flow.async_step_reconfigure({"username": "New-User", "password": "new-secret"}))
@@ -108,17 +108,17 @@ def test_reconfigure_updates_credentials_and_preserves_options(monkeypatch) -> N
     kwargs = manager.async_update_entry.call_args.kwargs
     assert kwargs["unique_id"] == "new-user"
     assert kwargs["title"] == "New-User"
-    assert kwargs["data"]["username"] == "New-User"
-    assert kwargs["data"]["password"] == "new-secret"
-    assert kwargs["data"]["account_id"] == 123
+    assert kwargs["data"] == {"username": "New-User", "password": "new-secret"}
+    assert kwargs["options"] == {"account_options": {"123": {"water_heating_rate": 0.05}}}
     assert entry.options == options
     manager.async_schedule_reload.assert_called_once_with("entry-1")
 
 
-def test_reauth_updates_credentials_preserving_legacy_data(monkeypatch) -> None:
+def test_reauth_updates_credentials_and_keeps_only_account_options(monkeypatch) -> None:
     import custom_components.zkhnso.config_flow as flow_module
 
-    entry = SimpleNamespace(entry_id="entry", data={"username": "old", "account_id": 123})
+    entry = SimpleNamespace(entry_id="entry", data={"username": "old", "account_id": 123},
+        options={"other": 1, "account_options": {"123": {"water_heating_rate": 0.05, "extra": 1}}})
     manager = SimpleNamespace(async_update_entry=MagicMock(), async_reload=AsyncMock())
     flow = ConfigFlow()
     flow.hass = SimpleNamespace(config_entries=manager)
@@ -127,8 +127,23 @@ def test_reauth_updates_credentials_preserving_legacy_data(monkeypatch) -> None:
     monkeypatch.setattr(flow_module, "validate_input", AsyncMock(return_value={"username": "user"}))
     result = asyncio.run(flow.async_step_reauth_confirm({"username": "user", "password": "pass"}))
     assert result == {"reason": "reauth_successful"}
-    assert manager.async_update_entry.call_args.kwargs["data"] == {"username": "user", "password": "pass", "account_id": 123}
+    assert manager.async_update_entry.call_args.kwargs["data"] == {"username": "user", "password": "pass"}
+    assert manager.async_update_entry.call_args.kwargs["options"] == {"account_options": {"123": {"water_heating_rate": 0.05}}}
     manager.async_reload.assert_awaited_once_with("entry")
+
+
+@pytest.mark.parametrize("step", ["reauth_confirm", "reconfigure"])
+def test_credentials_update_does_not_create_account_options(monkeypatch, step) -> None:
+    import custom_components.zkhnso.config_flow as flow_module
+
+    flow, entry, manager = _reconfigure_flow(monkeypatch)
+    entry.options = {"water_heating_rate": 0.1}
+    manager.async_reload = AsyncMock()
+    monkeypatch.setattr(flow, "_get_reauth_entry", lambda: entry)
+    monkeypatch.setattr(flow_module, "validate_input", AsyncMock(return_value={"username": "user"}))
+    asyncio.run(getattr(flow, f"async_step_{step}")({"username": "user", "password": "pass"}))
+    assert manager.async_update_entry.call_args.kwargs["data"] == {"username": "user", "password": "pass"}
+    assert manager.async_update_entry.call_args.kwargs["options"] == {}
 
 
 @pytest.mark.parametrize(

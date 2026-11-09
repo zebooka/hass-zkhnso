@@ -3,11 +3,13 @@ import asyncio
 from types import SimpleNamespace
 
 import pytest
+from aiohttp import web
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
 from custom_components.zkhnso.api_client import ZKHAPIConnectionError
 from custom_components.zkhnso.coordinator import ZKHDataUpdateCoordinator
+from custom_components.zkhnso.sensor import ZKHMeterSensor, ZKHTariffSensor, async_setup_entry
 
 
 class _Client:
@@ -40,6 +42,82 @@ class _Client:
 
     async def get_tariffs(self):
         return {"Water": {"rate_per_unit": int(self.current_account_id)}}
+
+
+def test_http_session_fetches_distinct_accounts_and_creates_sensors(monkeypatch) -> None:
+    """Exercise the actual client, parser, coordinator and sensor setup together."""
+    from unittest.mock import MagicMock
+    import custom_components.zkhnso.api_client as api_client
+
+    async def run():
+        current = "42"
+        requests = []
+
+        async def login_page(request):
+            response = web.Response(text='<form id="loginForm"><input name="loginToken" value="token"></form>')
+            response.set_cookie("JSESSIONID", "session")
+            return response
+
+        async def login(request):
+            assert request.cookies.get("JSESSIONID") == "session"
+            return web.Response(text='''<div class="header"><div class="account"><span>42</span>
+                <div class="acc-select"><table class="accounts-grid">
+                <tr><td>ЛС: 42</td><td>Адрес 1</td></tr>
+                <tr><td>ЛС: 43</td><td>Адрес 2</td></tr>
+                </table></div></div><div class="address">Адрес 1</div></div>''')
+
+        async def switch(request):
+            nonlocal current
+            assert request.cookies.get("JSESSIONID") == "session"
+            current = request.query["account"]
+            requests.append(("switch", current))
+            raise web.HTTPFound("main.action")
+
+        async def counters(request):
+            assert request.cookies.get("JSESSIONID") == "session"
+            requests.append(("meters", current))
+            row = ('<tr><td>Вода</td><td>111</td><td>куб.м.</td><td>01.01.2026</td><td>10</td><td>01.01.2030</td></tr>'
+                   if current == "42" else
+                   '<tr><td>Газ</td><td>222</td><td>куб.м.</td><td>01.01.2026</td><td>30</td><td>01.01.2030</td></tr>')
+            return web.Response(text=f'<form id="countersForm"><table><tr><th>Счётчик</th></tr>{row}</table></form>')
+
+        async def tariffs(request):
+            assert request.cookies.get("JSESSIONID") == "session"
+            requests.append(("tariffs", current))
+            row = ('<tr><td>ВОДА</td><td>0</td><td>куб.м.</td><td>20</td><td>01.01.2026</td></tr>'
+                   if current == "42" else
+                   '<tr><td>ГАЗ</td><td>0</td><td>куб.м.</td><td>40</td><td>01.01.2026</td></tr>')
+            return web.Response(text=f'<form id="tariffsForm"><table><tr><th>Тариф</th></tr>{row}</table></form>')
+
+        app = web.Application()
+        app.router.add_get('/room/lk/login.action', login_page)
+        app.router.add_post('/room/lk/doLogin!enter.action', login)
+        app.router.add_get('/room/lk/main!change.action', switch)
+        app.router.add_get('/room/lk/counters.action', counters)
+        app.router.add_get('/room/lk/tariffs.action', tariffs)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, '127.0.0.1', 0)
+        await site.start()
+        try:
+            port = site._server.sockets[0].getsockname()[1]
+            monkeypatch.setattr(api_client, 'API_BASE_URL', f'http://localhost:{port}/room/lk/')
+            coordinator = object.__new__(ZKHDataUpdateCoordinator)
+            coordinator.entry = SimpleNamespace(entry_id='entry', data={'username': 'user', 'password': 'pass', 'account_id': 42})
+            coordinator.data = await coordinator._async_update_data()
+            coordinator.async_add_listener = lambda callback: lambda: None
+            added = MagicMock()
+            await async_setup_entry(None, SimpleNamespace(runtime_data=coordinator, options={}, async_on_unload=MagicMock()), added)
+            entities = added.call_args.args[0]
+            meters = {(e._account_id, e.key): e.native_value for e in entities if isinstance(e, ZKHMeterSensor)}
+            tariffs_by_account = {(e._account_id, e.key): e.native_value for e in entities if isinstance(e, ZKHTariffSensor)}
+            assert meters == {('42', '111'): 10, ('43', '222'): 30}
+            assert tariffs_by_account == {('42', 'ВОДА'): 20, ('43', 'ГАЗ'): 40}
+            assert requests == [('meters', '42'), ('tariffs', '42'), ('switch', '43'), ('meters', '43'), ('tariffs', '43')]
+        finally:
+            await runner.cleanup()
+
+    asyncio.run(run())
 
 
 def test_coordinator_returns_meter_and_tariff_containers(monkeypatch) -> None:

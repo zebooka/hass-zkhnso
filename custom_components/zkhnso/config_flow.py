@@ -18,7 +18,6 @@ from homeassistant.helpers.selector import (
 
 from .api_client import ZKHAPIClient, ZKHAPIConnectionError
 from .const import (
-    CONF_ACCOUNT_ID,
     CONF_ACCOUNT_OPTIONS,
     CONF_BUILDING_FEATURES,
     CONF_HEATING_SYSTEM,
@@ -48,6 +47,26 @@ STEP_RECONFIGURE_SCHEMA = vol.Schema(
         ),
     }
 )
+
+HEATING_OPTION_KEYS = frozenset({
+    CONF_RATE_TYPE, CONF_WATER_HEATING_RATE, CONF_MANUAL_RATE,
+    CONF_HEATING_SYSTEM, CONF_BUILDING_FEATURES,
+})
+
+
+def _account_options(options: dict[str, Any]) -> dict[str, Any]:
+    """Keep only supported water heating options for each account."""
+    return {
+        account_id: {key: value for key, value in settings.items() if key in HEATING_OPTION_KEYS}
+        for account_id, settings in options.get(CONF_ACCOUNT_OPTIONS, {}).items()
+    }
+
+
+def _entry_options(options: dict[str, Any]) -> dict[str, Any]:
+    """Keep only the account options in the integration options."""
+    if CONF_ACCOUNT_OPTIONS not in options:
+        return {}
+    return {CONF_ACCOUNT_OPTIONS: _account_options(options)}
 
 
 async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str, Any]:
@@ -227,7 +246,8 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 old_entry = self._get_reauth_entry()
                 self.hass.config_entries.async_update_entry(
                     old_entry,
-                    data={**old_entry.data, **entry_data},
+                    data=entry_data,
+                    options=_entry_options(old_entry.options),
                     title=info["username"],
                 )
                 await self.hass.config_entries.async_reload(
@@ -302,7 +322,8 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 else:
                     return self.async_update_reload_and_abort(
                         entry, unique_id=username, title=info["username"],
-                        data_updates={CONF_USERNAME: info["username"], CONF_PASSWORD: user_input[CONF_PASSWORD]},
+                        data={CONF_USERNAME: info["username"], CONF_PASSWORD: user_input[CONF_PASSWORD]},
+                        options=_entry_options(entry.options),
                     )
 
         return self.async_show_form(
@@ -319,8 +340,7 @@ class ZKHOptionsFlow(WaterHeatingFlow, config_entries.OptionsFlow):
     """Manage water heating options for an existing entry."""
 
     def _existing_heating_options(self) -> dict[str, Any]:
-        options = self.config_entry.options
-        per_account = options.get(CONF_ACCOUNT_OPTIONS, {})
+        per_account = _account_options(self.config_entry.options)
         return dict(per_account.get(self._selected_account, {}))
 
     def _rate_type_form(self, schema: vol.Schema, errors: dict[str, str]):
@@ -340,7 +360,7 @@ class ZKHOptionsFlow(WaterHeatingFlow, config_entries.OptionsFlow):
         if not accounts:
             return self.async_abort(reason="no_accounts")
         if user_input is not None:
-            account_id = user_input.get(CONF_ACCOUNT_ID)
+            account_id = user_input.get("account_id")
             if account_id in accounts:
                 self._selected_account = account_id
                 return await self.async_step_rate_type()
@@ -349,7 +369,7 @@ class ZKHOptionsFlow(WaterHeatingFlow, config_entries.OptionsFlow):
             errors = {}
         choices = [{"value": account_id, "label": f"№{account_id} {account.get('address', '')}"} for account_id, account in accounts.items()]
         return self.async_show_form(
-            step_id="init", data_schema=vol.Schema({vol.Required(CONF_ACCOUNT_ID): SelectSelector(SelectSelectorConfig(options=choices, mode=SelectSelectorMode.DROPDOWN))}), errors=errors,
+            step_id="init", data_schema=vol.Schema({vol.Required("account_id"): SelectSelector(SelectSelectorConfig(options=choices, mode=SelectSelectorMode.DROPDOWN))}), errors=errors,
         )
 
     async def async_step_rate_type_unset(self, user_input=None):
@@ -357,11 +377,11 @@ class ZKHOptionsFlow(WaterHeatingFlow, config_entries.OptionsFlow):
         return await self.async_step_rate_type(user_input)
 
     async def _finish_water_heating(self):
-        options = dict(self.config_entry.options)
-        per_account = dict(options.get(CONF_ACCOUNT_OPTIONS, {}))
-        per_account[self._selected_account] = dict(self._heating_options())
-        options[CONF_ACCOUNT_OPTIONS] = per_account
-        return self.async_create_entry(data=options)
+        per_account = _account_options(self.config_entry.options)
+        per_account[self._selected_account] = {
+            key: value for key, value in self._heating_options().items() if key in HEATING_OPTION_KEYS
+        }
+        return self.async_create_entry(data={CONF_ACCOUNT_OPTIONS: per_account})
 
 
 class CannotConnect(HomeAssistantError):

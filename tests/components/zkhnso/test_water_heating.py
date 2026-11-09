@@ -47,7 +47,7 @@ def _suggested(form):
 def test_options_select_account_and_keep_rates_separate(monkeypatch):
     flow = ZKHOptionsFlow()
     old = {"water_heating_rate": 0.1, "rate_type": "auto", "other": 5,
-           "account_options": {"43": {"rate_type": "manual", "water_heating_rate": 0.08}}}
+           "account_options": {"43": {"rate_type": "manual", "water_heating_rate": 0.08, "other": 5}}}
     flow._config_entry = SimpleNamespace(options=old, runtime_data=SimpleNamespace(data={"accounts": {
         "42": {"address": "Первый"}, "43": {"address": "Второй"},
     }}))
@@ -61,8 +61,8 @@ def test_options_select_account_and_keep_rates_separate(monkeypatch):
     result = asyncio.run(flow.async_step_rate_manual({"manual_rate": "0.04"}))
     assert result["data"]["account_options"]["42"]["water_heating_rate"] == 0.04
     assert result["data"]["account_options"]["43"]["water_heating_rate"] == 0.08
-    assert result["data"]["water_heating_rate"] == 0.1
-    assert result["data"]["other"] == 5
+    assert set(result["data"]) == {"account_options"}
+    assert result["data"]["account_options"]["43"] == {"rate_type": "manual", "water_heating_rate": 0.08}
     assert old["water_heating_rate"] == 0.1
 
 
@@ -74,14 +74,14 @@ def test_options_without_accounts_aborts(monkeypatch):
 
 
 def test_options_none_and_existing_options(monkeypatch):
-    """None clears the effective rate and preserves unrelated options."""
+    """None clears the effective rate and discards unsupported options."""
     flow = _options_flow(monkeypatch, {"other": 42, "water_heating_rate": 1, "rate_type": "manual"})
     first = asyncio.run(flow.async_step_rate_type())
     assert first["step_id"] == "rate_type"
     assert _suggested(first)["rate_type"] == "manual"
     result = asyncio.run(flow.async_step_rate_type({"rate_type": "none"}))
     assert result["data"]["account_options"]["42"]["water_heating_rate"] is None
-    assert result["data"]["account_options"]["42"]["other"] == 42
+    assert "other" not in result["data"]["account_options"]["42"]
 
 
 @pytest.mark.parametrize("rate", [0.06528, 0, 0.123456789])
@@ -219,7 +219,7 @@ def test_options_manual_prefills_saved_auto_rate(monkeypatch, rate, old_manual):
     result = asyncio.run(flow.async_step_rate_manual({"manual_rate": str(rate)}))
     assert result["data"]["account_options"]["42"]["rate_type"] == "manual"
     assert result["data"]["account_options"]["42"]["water_heating_rate"] == rate
-    assert result["data"]["account_options"]["42"]["other"] == 42
+    assert "other" not in result["data"]["account_options"]["42"]
 
 
 def test_options_auto_without_rate_does_not_prefill_manual(monkeypatch):
@@ -270,7 +270,7 @@ def test_options_update_reloads_entry():
 def test_sensor_setup_with_configured_rate():
     """A configured heating rate does not prevent tariff sensor creation."""
     entry = SimpleNamespace(
-        entry_id="entry", data={"account_id": 42}, options={"account_options": {"42": {"water_heating_rate": 0.06528}}}
+        entry_id="entry", data={}, options={"account_options": {"42": {"water_heating_rate": 0.06528}}}
     )
     entry.runtime_data = SimpleNamespace(
         entry=entry,
@@ -286,5 +286,5 @@ def test_sensor_setup_with_configured_rate():
     assert sum(isinstance(entity, ZKHCombinedHotWaterTariffSensor) for entity in args[0]) == 1
     sensor = next(entity for entity in args[0] if isinstance(entity, ZKHTariffSensor))
     assert isinstance(sensor, ZKHTariffSensor)
-    assert sensor.unique_id == "entry_tariff_water"
+    assert sensor.unique_id == "entry_account_42_tariff_water"
     assert sensor.native_value == 50.25

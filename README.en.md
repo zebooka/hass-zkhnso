@@ -49,6 +49,8 @@ This integration is configured through the Home Assistant user interface:
 
 Use the username and password from your ZKHNSO personal account. Credentials are validated before the integration entry is created. If the password changes, Home Assistant prompts you to reauthenticate.
 
+Settings from previous versions are incompatible with the new version: remove the old integration entry and configure it again. Previously created devices and entities may differ from the new ones.
+
 ## Features
 
 - Retrieves active meters, including serial number, meter type, next verification date, current reading, and the date of the most recent reading submission.

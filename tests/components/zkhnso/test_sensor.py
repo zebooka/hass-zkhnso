@@ -26,12 +26,12 @@ def _coordinator(data: dict) -> SimpleNamespace:
         data = {"accounts": {"42": {"address": "Новосибирск, ул. Ленина, 1", **data}}}
     return SimpleNamespace(
         data=data,
-        entry=SimpleNamespace(entry_id="entry", data={"account_id": 42, "address": "Новосибирск, ул. Ленина, 1", "username": "user"}),
+        entry=SimpleNamespace(entry_id="entry", data={"username": "user"}),
     )
 
 
-def test_entry_sensors_share_device_and_keep_unique_ids() -> None:
-    """Meters and all tariff sensors use one device without changing unique IDs."""
+def test_entry_sensors_share_account_device() -> None:
+    """Meters and tariff sensors use the account-specific device and IDs."""
     meter = {"name": "Вода", "unit": "куб.м.", "value": 12.5}
     tariff = {"name": "Water", "unit": "куб.м.", "rate_per_unit": 10}
     coordinator = _coordinator({"meters": {"1": meter}, "tariffs": {"water": tariff}})
@@ -42,13 +42,13 @@ def test_entry_sensors_share_device_and_keep_unique_ids() -> None:
     entities = add_entities.call_args.args[0]
     assert len(entities) == 4
     assert {entity.unique_id for entity in entities} == {
-        "entry_meter_1", "entry_tariff_water",
-        "entry_combined_tariff_ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ",
-        "entry_combined_tariff_ГОРЯЧЕЕ ВОДОСНАБЖЕНИЕ",
+        "entry_account_42_meter_1", "entry_account_42_tariff_water",
+        "entry_account_42_combined_tariff_ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ",
+        "entry_account_42_combined_tariff_ГОРЯЧЕЕ ВОДОСНАБЖЕНИЕ",
     }
     for entity in entities:
         assert entity.device_info == {
-            "identifiers": {("zkhnso", "entry")},
+            "identifiers": {("zkhnso", "entry_account_42")},
             "name": "№42 Новосибирск, ул. Ленина, 1",
         }
         assert entity.has_entity_name is True
@@ -61,8 +61,8 @@ def test_different_entries_have_separate_devices() -> None:
     second.entry.entry_id = "another-entry"
     first_sensor = ZKHCombinedColdWaterTariffSensor(first, "42")
     second_sensor = ZKHCombinedColdWaterTariffSensor(second, "42")
-    assert first_sensor.device_info["identifiers"] == {("zkhnso", "entry")}
-    assert second_sensor.device_info["identifiers"] == {("zkhnso", "another-entry")}
+    assert first_sensor.device_info["identifiers"] == {("zkhnso", "entry_account_42")}
+    assert second_sensor.device_info["identifiers"] == {("zkhnso", "another-entry_account_42")}
     assert first_sensor.unique_id != second_sensor.unique_id
 
 
@@ -82,9 +82,9 @@ def test_multiple_accounts_are_isolated_and_new_accounts_are_discovered() -> Non
     assert len({entity.unique_id for entity in entities}) == 8
     meters = {entity._account_id: entity for entity in entities if isinstance(entity, ZKHMeterSensor)}
     tariffs = {entity._account_id: entity for entity in entities if isinstance(entity, ZKHTariffSensor)}
-    assert meters["42"].unique_id == "entry_meter_1"
+    assert meters["42"].unique_id == "entry_account_42_meter_1"
     assert meters["43"].unique_id == "entry_account_43_meter_1"
-    assert meters["42"].device_info == {"identifiers": {("zkhnso", "entry")}, "name": "№42 Адрес 1"}
+    assert meters["42"].device_info == {"identifiers": {("zkhnso", "entry_account_42")}, "name": "№42 Адрес 1"}
     assert meters["43"].device_info == {"identifiers": {("zkhnso", "entry_account_43")}, "name": "№43 Адрес 2"}
     assert (meters["42"].native_value, meters["43"].native_value) == (10, 30)
     assert (tariffs["42"].native_value, tariffs["43"].native_value) == (20, 40)
@@ -114,11 +114,11 @@ def test_combined_tariffs_use_only_their_own_account() -> None:
     assert second.native_value is None
 
 
-def test_leading_zeroes_keep_existing_account_ids() -> None:
+def test_leading_zeroes_preserved_in_account_ids() -> None:
     coordinator = _coordinator({"accounts": {"0042": {"address": "Адрес", "meters": {}}}})
     sensor = ZKHMeterSensor(coordinator, "1", {}, "0042")
-    assert sensor.unique_id == "entry_meter_1"
-    assert sensor.device_info["identifiers"] == {("zkhnso", "entry")}
+    assert sensor.unique_id == "entry_account_0042_meter_1"
+    assert sensor.device_info["identifiers"] == {("zkhnso", "entry_account_0042")}
 
 
 @pytest.mark.parametrize("data,expected", [
@@ -132,7 +132,7 @@ def test_device_name_uses_account_details(data, expected) -> None:
     coordinator.entry.data = data
     sensor = ZKHCombinedColdWaterTariffSensor(coordinator, account_id)
     assert sensor.device_info["name"] == expected
-    assert sensor.device_info["identifiers"] == {("zkhnso", "entry")}
+    assert sensor.device_info["identifiers"] == {("zkhnso", f"entry_account_{account_id}")}
 
 
 def test_device_name_reflects_updated_account_details() -> None:
@@ -140,7 +140,7 @@ def test_device_name_reflects_updated_account_details() -> None:
     sensor = ZKHCombinedColdWaterTariffSensor(coordinator, "42")
     coordinator.data["accounts"]["42"]["address"] = "Новый адрес"
     assert sensor.device_info["name"] == "№42 Новый адрес"
-    assert sensor.device_info["identifiers"] == {("zkhnso", "entry")}
+    assert sensor.device_info["identifiers"] == {("zkhnso", "entry_account_42")}
 
 
 def test_meter_uses_current_coordinator_data_and_clears_removed_meter() -> None:
@@ -249,7 +249,7 @@ def test_combined_tariff_search_skips_unavailable_duplicate() -> None:
 
 def test_combined_tariff_sensor_properties() -> None:
     sensor = ZKHCombinedTariffSensor(_coordinator({}), "Test", "42")
-    assert sensor.unique_id == "entry_combined_tariff_Test"
+    assert sensor.unique_id == "entry_account_42_combined_tariff_Test"
     assert sensor.translation_key == "combined_tariff"
     assert sensor.translation_placeholders == {"name": "Test", "account_id": "42"}
     assert sensor.native_unit_of_measurement == "RUB/m³"

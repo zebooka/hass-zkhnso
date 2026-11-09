@@ -13,9 +13,6 @@ API_URL_CHANGE_ACCOUNT_ID = "main!change.action?account=%s"
 
 CONF_USERNAME = "username"
 CONF_PASSWORD = "password"
-CONF_ACCOUNT_ID = "account_id"
-CONF_ADDRESS = "address"
-
 CONF_WATER_HEATING_RATE = "water_heating_rate"
 CONF_RATE_TYPE = "rate_type"
 CONF_HEATING_SYSTEM = "heating_system"
