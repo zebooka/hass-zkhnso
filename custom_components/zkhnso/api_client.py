@@ -6,12 +6,13 @@ import re
 from collections import Counter
 from datetime import datetime
 from typing import Any
-from urllib.parse import urlencode, urljoin
+from urllib.parse import quote, urlencode, urljoin, urlsplit
 
 import aiohttp
 
 from .const import (
     API_BASE_URL,
+    API_URL_CHANGE_ACCOUNT_ID,
     API_URL_LOGIN,
     API_URL_MAIN,
     API_URL_METERS,
@@ -39,8 +40,9 @@ class ZKHAPIClient:
         self.session: aiohttp.ClientSession | None = None
         self.jsessionid: str | None = None
         self.form_token: str | None = None
-        self.address: str | None = None
-        self.account_id: int | None = None
+        self.current_address: str | None = None
+        self.current_account_id: str | None = None
+        self.accounts: dict[str, str] = {}
 
     async def __aenter__(self) -> ZKHAPIClient:
         """Create an HTTP session and cookie jar isolated to this client."""
@@ -191,15 +193,27 @@ class ZKHAPIClient:
                     _LOGGER.debug("JSESSIONID updated after login")
 
                 if not self._is_login_page(response_text):
-                    address = html_to_json_simple(response_text, ".header .address")
-                    if isinstance(address, str):
-                        self.address = " ".join(address.split()) or None
+                    self.accounts = {}
+                    current_account_id = html_to_json_simple(response_text, ".header .account span")
+                    current_address = html_to_json_simple(response_text, ".header .address")
+                    if not isinstance(current_account_id, str) or not isinstance(current_address, str):
+                        _LOGGER.error("Login was accepted, put page contains no current account information")
+                        return False
 
-                    account_id = html_to_json_simple(response_text, ".header .account span")
-                    if isinstance(account_id, str):
-                        account_id = "".join(account_id.split())
-                        if account_id.isdecimal():
-                            self.account_id = int(account_id)
+                    self.current_account_id = " ".join(current_account_id.split()) or None
+                    if self.current_account_id is not None:
+                        self.accounts[self.current_account_id] = " ".join(current_address.split())
+
+                    rows = extract_table_rows_with_children(
+                        response_text, ".header .account .acc-select .accounts-grid tr"
+                    ) or []
+                    for row in rows:
+                        if len(row) < 2:
+                            continue
+                        account_id = row[0].strip().removeprefix("ЛС:").strip() or None
+                        address = " ".join(row[1].split()) or None
+                        if account_id is not None and address is not None:
+                            self.accounts[account_id] = address
 
                     _LOGGER.debug("Login response accepted")
                     return True
@@ -215,6 +229,28 @@ class ZKHAPIClient:
             raise
         except Exception as err:
             raise ZKHAPIConnectionError("Failed to connect to ZKHNSO during login") from err
+
+    async def change_account(self, account_id: str) -> None:
+        """Switch the session to another account, verifying the expected redirect."""
+        if not self.jsessionid:
+            raise ZKHAPIConnectionError("Must be logged in to change account")
+        url = urljoin(API_BASE_URL, API_URL_CHANGE_ACCOUNT_ID % quote(str(account_id), safe=""))
+        try:
+            async with self._session.get(
+                url, allow_redirects=False,
+                headers={"Referer": urljoin(API_BASE_URL, API_URL_MAIN)},
+                cookies=self._get_authenticated_cookies(),
+            ) as response:
+                location = response.headers.get("Location", "")
+                target = urlsplit(urljoin(url, location))
+                expected = urlsplit(urljoin(API_BASE_URL, API_URL_MAIN))
+                if response.status >= 400 or not location or (target.scheme, target.netloc, target.path) != (expected.scheme, expected.netloc, expected.path):
+                    raise ZKHAPIConnectionError("Account switch returned an unexpected response")
+                self.current_account_id = account_id
+        except ZKHAPIConnectionError:
+            raise
+        except Exception as err:
+            raise ZKHAPIConnectionError("Failed to switch ZKHNSO account") from err
 
     async def get_meters(self) -> dict[str, Any] | None:
         """Fetch meters/counters data."""
@@ -294,7 +330,7 @@ class ZKHAPIClient:
     def _process_meters_data(self, rows: list[list[str]]) -> dict[str, Any]:
         """Process table rows into meters data structure."""
         if not rows or len(rows) < 2:
-            return {"meters": {}, "max_date": None}
+            return {}
 
         meters = {}
 
@@ -329,7 +365,7 @@ class ZKHAPIClient:
     def _process_tariffs_data(self, rows: list[list[str]]) -> dict[str, Any]:
         """Process table rows into tariffs data structure."""
         if not rows or len(rows) < 2:
-            return {"tariffs": {}}
+            return {}
 
         valid_rows = [row for row in rows[1:] if len(row) >= 5]
         name_counts = Counter(row[0].strip() for row in valid_rows)

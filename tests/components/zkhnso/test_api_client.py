@@ -55,6 +55,59 @@ def test_login_without_preflight_is_connection_error() -> None:
         asyncio.run(ZKHAPIClient("user", "password").login())
 
 
+def test_login_extracts_accounts_and_current_selection() -> None:
+    client = _login_client(body="""
+        <div class="header"><div class="account"><span> 42 </span>
+        <div class="acc-select"><table class="accounts-grid">
+        <tr><td> ЛС: 42 </td><td>Адрес 1</td></tr>
+        <tr><td> ЛС:  43 </td><td> Адрес 2 </td></tr>
+        <tr><td>broken</td></tr>
+        </table></div></div><div class="address">Текущий адрес</div></div>
+    """)
+    assert asyncio.run(client.login()) is True
+    assert client.current_account_id == 42
+    assert client.current_address == "Текущий адрес"
+    assert client.accounts == {"42": "Текущий адрес", "43": "Адрес 2"}
+
+
+def test_account_numbers_keep_leading_zeroes() -> None:
+    client = _login_client(body="""
+        <div class="header"><div class="account"><span>42</span>
+        <div class="acc-select"><table class="accounts-grid">
+        <tr><td>ЛС: 0042</td><td>Адрес</td></tr>
+        <tr><td>ЛС: A-43</td><td>Другой адрес</td></tr>
+        </table></div></div><div class="address">Адрес</div></div>
+    """)
+    assert asyncio.run(client.login())
+    assert client.accounts == {"0042": "Адрес", "A-43": "Другой адрес"}
+
+
+@pytest.mark.parametrize("status,location,success", [
+    (302, "main.action", True),
+    (302, "/room/lk/main.action", True),
+    (302, "login.action", False),
+    (302, "https://other.example/room/lk/main.action", False),
+    (200, "main.action", False),
+    (302, "", False),
+])
+def test_change_account_requires_main_redirect(status, location, success) -> None:
+    client = ZKHAPIClient("user", "password")
+    client.jsessionid = "session"
+    response = SimpleNamespace(status=status, headers={"Location": location})
+    request = MagicMock()
+    request.__aenter__ = AsyncMock(return_value=response)
+    request.__aexit__ = AsyncMock(return_value=None)
+    client.session = SimpleNamespace(get=MagicMock(return_value=request))
+    if success:
+        asyncio.run(client.change_account("43"))
+    else:
+        with pytest.raises(ZKHAPIConnectionError):
+            asyncio.run(client.change_account("43"))
+    args, kwargs = client.session.get.call_args
+    assert args[0].endswith("main!change.action?account=43")
+    assert kwargs["allow_redirects"] is False
+
+
 def test_process_meters_preserves_fractional_reading() -> None:
     """Meter values retain fractional readings from the portal."""
     client = ZKHAPIClient("user", "password")
@@ -165,3 +218,9 @@ def test_process_data_skips_invalid_rows() -> None:
 
     assert list(meters) == ["42"]
     assert list(tariffs) == ["Water"]
+
+
+def test_empty_tables_produce_empty_data() -> None:
+    client = ZKHAPIClient("user", "password")
+    assert client._process_meters_data([]) == {}
+    assert client._process_tariffs_data([]) == {}

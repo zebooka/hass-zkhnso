@@ -25,11 +25,13 @@ SQUARE_UNITS = {"кв.м.", "кв.м", "м²", "m²"}
 VOLUME_UNITS = {"куб.м.", "куб.м", "м³", "m³"}
 ELECTRIC_UNITS = {"кВтч", "кВт·ч", "кВт⋅ч", "kWh"}
 HEAT_UNITS = {"Гкал", "Gcal"}
+
 WASTE_WATER_TARIFFS = ["ВОДООТВЕДЕНИЕ", "ОТВЕД. СТОЧ. ВОД СОИ"]
 COLD_WATER_TARIFFS = ["ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ", "ХВ НА СОД-Е ОБЩ.ИМУЩ."]
 HOT_WATER_TARIFFS = ["ГОРЯЧЕЕ ВОДОСНАБЖЕНИЕ", "ГВ НА СОД-Е ОБЩ.ИМУЩ."]
 HOT_WATER_HEATING_TARIFFS = ["ГОРЯЧЕЕ ВОДОСНАБЖЕНИЕ (ПОДОГРЕВ)", "ГВ НА СОИ (ПОДОГРЕВ)", "ОТОПЛЕНИЕ"]
 HOT_WATER_FLUID_TARIFFS = ["ГОРЯЧЕЕ ВОДОСНАБЖЕНИЕ (ТЕПЛОНОСИТ)", "ГВ НА СОИ (ТЕПЛОНОСИТ)", "ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ", "ХВ НА СОД-Е ОБЩ.ИМУЩ."]
+
 PARALLEL_UPDATES = 0
 
 
@@ -38,99 +40,81 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up ZKH sensor platform."""
     coordinator: ZKHDataUpdateCoordinator = entry.runtime_data
 
-    # Create sensors dynamically based on meters and tariffs data
-    entities = []
+    known: set[tuple[str, str, str]] = set()
 
-    # Create meter sensors
-    if coordinator.data and isinstance(coordinator.data, dict) and "meters" in coordinator.data:
-        meters = coordinator.data["meters"]
-        if meters and isinstance(meters, dict) and len(meters) > 0:
-            meter_entities = [
-                ZKHMeterSensor(coordinator, meter_key, meter_data)
-                for meter_key, meter_data in meters.items()
-            ]
-            entities.extend(meter_entities)
-            _LOGGER.info("Created %d meter sensors", len(meter_entities))
-        else:
-            _LOGGER.warning(
-                "Meters data is empty or invalid. Meters: %s (type: %s, len: %s)",
-                meters,
-                type(meters),
-                len(meters) if isinstance(meters, dict) else "N/A",
-            )
+    def add_new_sensors() -> None:
+        accounts = coordinator.data.get("accounts") if coordinator.data is dict else {}
+        entities = []
+        for account_id, account in accounts.items():
+            for kind, cls in (("meters", ZKHMeterSensor), ("tariffs", ZKHTariffSensor)):
+                items = account.get(kind)
+                if not isinstance(items, dict):
+                    continue
+                for key, value in items.items():
+                    identity = (account_id, kind, key)
+                    if identity not in known and isinstance(value, dict):
+                        entities.append(cls(coordinator, key, value, account_id))
+                        known.add(identity)
+            if account.get("tariffs") and (account_id, "combined", "water") not in known:
+                entities.append(ZKHCombinedColdWaterTariffSensor(coordinator, account_id))
+                entities.append(ZKHCombinedHotWaterTariffSensor(coordinator, entry.options.get(CONF_WATER_HEATING_RATE), account_id))
+                known.add((account_id, "combined", "water"))
+        if entities:
+            async_add_entities(entities, update_before_add=False)
 
-    # Create tariff sensors
-    if coordinator.data and isinstance(coordinator.data, dict) and "tariffs" in coordinator.data:
-        tariffs = coordinator.data["tariffs"]
-        if tariffs and isinstance(tariffs, dict) and len(tariffs) > 0:
-            tariff_entities = [
-                ZKHTariffSensor(coordinator, key, tariff)
-                for key, tariff in tariffs.items()
-            ]
-            tariff_entities.append(ZKHCombinedColdWaterTariffSensor(coordinator))
-            _LOGGER.info("Configured water heating rate: %s Gcal/m³", entry.options.get(CONF_WATER_HEATING_RATE))
-            tariff_entities.append(ZKHCombinedHotWaterTariffSensor(coordinator, entry.options.get(CONF_WATER_HEATING_RATE)))
-            entities.extend(tariff_entities)
-            _LOGGER.info("Created %d tariff sensors", len(tariff_entities))
-        else:
-            _LOGGER.warning(
-                "Tariffs data is empty or invalid. Tariffs: %s (type: %s, len: %s)",
-                tariffs,
-                type(tariffs),
-                len(tariffs) if isinstance(tariffs, dict) else "N/A",
-            )
-
-    if entities:
-        async_add_entities(entities, update_before_add=False)
-        _LOGGER.info("Total sensors created: %d", len(entities))
-    else:
-        _LOGGER.error(
-            "No sensors created. Coordinator data: %s (type: %s). "
-            "This might indicate an API issue. Check logs for errors.",
-            coordinator.data,
-            type(coordinator.data) if coordinator.data else None,
-        )
+    add_new_sensors()
+    if hasattr(coordinator, "async_add_listener"):
+        entry.async_on_unload(coordinator.async_add_listener(add_new_sensors))
 
 
 class ZKHSensor(CoordinatorEntity, SensorEntity):
-    """Base class for sensors belonging to the same integration entry."""
-
     _attr_has_entity_name = True
+
+    def __init__(
+            self,
+            coordinator: ZKHDataUpdateCoordinator,
+            account_id: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._account_id = account_id
+
+    @property
+    def _account(self) -> dict | None:
+        if not self.coordinator.data:
+            return None
+
+        return self.coordinator.data.get("accounts", {}).get(self.account_id, {}) or None
+
+    @property
+    def _id_prefix(self) -> str:
+        return f"{self.coordinator.entry.entry_id}_account_{self._account_id}"
 
     @property
     def device_info(self) -> DeviceInfo:
-        """Group sensors of this entry under a single device."""
-        data = self.coordinator.entry.data
-        account_id = data.get(CONF_ACCOUNT_ID)
-        address = data.get(CONF_ADDRESS)
-
         return DeviceInfo(
-            identifiers={(DOMAIN, self.coordinator.entry.entry_id)},
-            name=f" №{account_id} {address}",
+            identifiers={(DOMAIN, self._id_prefix)},
+            name=f"№{self._account_id} {self._account.get('address')}".strip(),
         )
 
 
 class ZKHMeterSensor(ZKHSensor):
-    """Representation of a ZKH meter sensor."""
-
     def __init__(
         self,
         coordinator: ZKHDataUpdateCoordinator,
         key: str,
         meter: dict,
+        account_id: str,
     ) -> None:
-        """Initialize the meter sensor."""
-        super().__init__(coordinator)
+        super().__init__(coordinator, account_id)
         self.key = key
-        self._attr_unique_id = f"{self.coordinator.entry.entry_id}_meter_{key}"
+        self._attr_unique_id = f"{self._id_prefix}_meter_{key}"
         self._attr_translation_key = "meter"
         self._attr_translation_placeholders = {
             "name": str(meter.get("name", key)),
             "serial_number": str(meter.get("serial_number")),
-            "account_id": str(self.coordinator.entry.data.get(CONF_ACCOUNT_ID)),
+            "account_id": self._account_id,
         }
         self._attr_icon = "mdi:counter"
         self._attr_state_class = SensorStateClass.TOTAL
@@ -153,24 +137,18 @@ class ZKHMeterSensor(ZKHSensor):
             self._attr_native_unit_of_measurement = UnitOfEnergy.GIGA_CALORIE
 
     @property
-    def meter(self) -> dict | None:
-        """Return current meter data from the coordinator."""
-        if not self.coordinator.data:
-            return None
-
-        meters = self.coordinator.data.get("meters", {})
-        return meters.get(self.key) if isinstance(meters, dict) else None
+    def _meter(self) -> dict | None:
+        account = self._account
+        return account.get("meters", {}).get(self.key) or None if isinstance(account, dict) else None
 
     @property
     def native_value(self) -> float | None:
-        """Return the current meter value."""
-        meter = self.meter
-        return meter.get("value") if meter is not None else None
+        meter = self._meter
+        return self._meter.get("value") if isinstance(meter, dict) else None
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Return current meter attributes."""
-        meter = self.meter
+        meter = self._meter
         if meter is None:
             return {}
 
@@ -184,45 +162,37 @@ class ZKHMeterSensor(ZKHSensor):
 
 
 class ZKHTariffSensor(ZKHSensor):
-    """Representation of a ZKH tariff sensor."""
-
     def __init__(
         self,
         coordinator: ZKHDataUpdateCoordinator,
         key: str,
         tariff: dict,
+        account_id: str
     ) -> None:
-        """Initialize the tariff sensor."""
-        super().__init__(coordinator)
+        super().__init__(coordinator, account_id)
         self.key = key
-        self._attr_unique_id = f"{self.coordinator.entry.entry_id}_tariff_{key}"
+        self._attr_unique_id = f"{self._id_prefix}_tariff_{key}"
         self._attr_translation_key = "tariff"
         self._attr_translation_placeholders = {
             "name": str(tariff.get("name", key)),
-            "account_id": str(self.coordinator.entry.data.get(CONF_ACCOUNT_ID)),
+            "account_id": self.account_id,
         }
         self._attr_native_unit_of_measurement = self._normalized_unit(tariff.get("unit"))
         self._attr_icon = "mdi:currency-rub"
 
     @property
-    def tariff(self) -> dict | None:
-        """Return current tariff data from the coordinator."""
-        if not self.coordinator.data:
-            return None
-
-        tariffs = self.coordinator.data.get("tariffs", {})
-        return tariffs.get(self.key) if isinstance(tariffs, dict) else None
+    def _tariff(self) -> dict | None:
+        account = self._account
+        return account.get("tariffs", {}).get(self.key) or None if isinstance(account, dict) else None
 
     @property
     def native_value(self) -> float | None:
-        """Return the current tariff value."""
-        tariff = self.tariff
-        return tariff.get("rate_per_unit") if tariff is not None else None
+        tariff = self._tariff
+        return tariff.get("rate_per_unit") if isinstance(tariff, dict) else None
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Return current tariff attributes."""
-        tariff = self.tariff
+        tariff = self._tariff
         if tariff is None:
             return {}
 
@@ -246,21 +216,18 @@ class ZKHTariffSensor(ZKHSensor):
         return f"RUB/{unit}" if unit else "RUB"
 
 class ZKHCombinedTariffSensor(ZKHSensor):
-    """Representation of a ZKH combined tariff sensor."""
-
     def __init__(
         self,
         coordinator: ZKHDataUpdateCoordinator,
         name: str,
+        account_id: str
     ) -> None:
-        """Initialize the tariff sensor."""
-        super().__init__(coordinator)
-        self.key = type
-        self._attr_unique_id = f"{self.coordinator.entry.entry_id}_combined_tariff_{name}"
+        super().__init__(coordinator, account_id)
+        self._attr_unique_id = f"{self._id_prefix}_combined_tariff_{name}"
         self._attr_translation_key = "combined_tariff"
         self._attr_translation_placeholders = {
             "name": str(name),
-            "account_id": str(self.coordinator.entry.data.get(CONF_ACCOUNT_ID)),
+            "account_id": self.account_id,
         }
         self._attr_native_unit_of_measurement = f"RUB/{UnitOfVolume.CUBIC_METERS}"
         self._attr_icon = "mdi:sigma"
@@ -270,9 +237,7 @@ class ZKHCombinedTariffSensor(ZKHSensor):
         return self._get_first_available_tariff(WASTE_WATER_TARIFFS, VOLUME_UNITS)
 
     def _get_first_available_tariff(self, names: list[str], units: set[str]) -> dict[str, Any] | None:
-        """Return the first tariff with a value, in the given name order."""
-        data = self.coordinator.data
-        tariffs = data.get("tariffs") if isinstance(data, dict) else None
+        tariffs = self._account.get("tariffs") if isinstance(self._account, dict) else None
         if not isinstance(tariffs, dict):
             return None
 
@@ -289,13 +254,12 @@ class ZKHCombinedTariffSensor(ZKHSensor):
         return None
 
 class ZKHCombinedColdWaterTariffSensor(ZKHCombinedTariffSensor):
-    """Representation of a ZKH combined cold water tariff sensor."""
     def __init__(
         self,
-        coordinator: ZKHDataUpdateCoordinator
+        coordinator: ZKHDataUpdateCoordinator,
+        account_id: str,
     ) -> None:
-        """Initialize the tariff sensor."""
-        super().__init__(coordinator, "ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ")
+        super().__init__(coordinator, "ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ", account_id)
 
     @property
     def _cold_water(self) -> dict[str, Any] | None:
@@ -303,7 +267,6 @@ class ZKHCombinedColdWaterTariffSensor(ZKHCombinedTariffSensor):
 
     @property
     def native_value(self) -> float | None:
-        """Return the combined cold water tariff value."""
         waste_water = self._waste_water
         cold_water = self._cold_water
 
@@ -312,7 +275,6 @@ class ZKHCombinedColdWaterTariffSensor(ZKHCombinedTariffSensor):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Return  the combined cold water tariff attributes."""
         waste_water = self._waste_water
         cold_water = self._cold_water
         if waste_water is None or cold_water is None:
@@ -327,14 +289,13 @@ class ZKHCombinedColdWaterTariffSensor(ZKHCombinedTariffSensor):
         }
 
 class ZKHCombinedHotWaterTariffSensor(ZKHCombinedTariffSensor):
-    """Representation of a ZKH combined hot water tariff sensor."""
     def __init__(
         self,
         coordinator: ZKHDataUpdateCoordinator,
         water_heating_rate: float | None,
+        account_id: str,
     ) -> None:
-        """Initialize the tariff sensor."""
-        super().__init__(coordinator, "ГОРЯЧЕЕ ВОДОСНАБЖЕНИЕ")
+        super().__init__(coordinator, "ГОРЯЧЕЕ ВОДОСНАБЖЕНИЕ", account_id)
         self._water_heating_rate = water_heating_rate
 
     @property
@@ -351,7 +312,6 @@ class ZKHCombinedHotWaterTariffSensor(ZKHCombinedTariffSensor):
 
     @property
     def native_value(self) -> float | None:
-        """Return the combined hot water tariff value."""
         waste_water = self._waste_water
         if waste_water is None:
             return None
@@ -374,7 +334,6 @@ class ZKHCombinedHotWaterTariffSensor(ZKHCombinedTariffSensor):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Return  the combined hot water tariff attributes."""
         waste_water = self._waste_water
         if waste_water is None:
             return {}

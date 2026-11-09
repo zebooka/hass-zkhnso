@@ -70,15 +70,26 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
         if not logged_in:
             raise InvalidAuth
 
-    if client.account_id is None or not client.address:
+    if client.current_account_id is None or not client.current_address:
         raise AccountParseError
 
     return {
-        "title": f"№{client.account_id} {client.address}",
+        "title": f"№{client.current_account_id} {client.current_address}",
         "username": username,
-        "account_id": client.account_id,
-        "address": client.address,
+        "account_id": client.current_account_id,
+        "address": client.current_address,
+        "accounts": client.accounts,
     }
+
+
+def _account_address(info: dict[str, Any], account_id: Any) -> str | None:
+    """Find an existing account even when its table number has leading zeroes."""
+    accounts = info.get("accounts", {str(info["account_id"]): info["address"]})
+    requested = str(account_id)
+    for number, address in accounts.items():
+        if number == requested or (number.isdecimal() and requested.isdecimal() and int(number) == int(requested)):
+            return address
+    return None
 
 
 def _select(options: tuple[str, ...], translation_key: str) -> SelectSelector:
@@ -232,10 +243,21 @@ class ConfigFlow(WaterHeatingFlow, config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_ADDRESS: info["address"],
             }
             if reauth:
+                old_entry = self._get_reauth_entry()
+                old_id = old_entry.data.get(CONF_ACCOUNT_ID)
+                address = _account_address(info, old_id)
+                if old_id is not None and address is None:
+                    return self.async_show_form(
+                        step_id="reauth_confirm", data_schema=STEP_USER_DATA_SCHEMA,
+                        errors={"base": "account_parse_error"},
+                    )
+                if old_id is not None:
+                    entry_data[CONF_ACCOUNT_ID] = old_id
+                    entry_data[CONF_ADDRESS] = address
                 self.hass.config_entries.async_update_entry(
-                    self._get_reauth_entry(),
+                    old_entry,
                     data=entry_data,
-                    title=info["title"],
+                    title=f"№{entry_data[CONF_ACCOUNT_ID]} {entry_data[CONF_ADDRESS]}",
                 )
                 await self.hass.config_entries.async_reload(
                     self._get_reauth_entry().entry_id
@@ -318,7 +340,7 @@ class ConfigFlow(WaterHeatingFlow, config_entries.ConfigFlow, domain=DOMAIN):
                 old_account_id = entry.data.get(CONF_ACCOUNT_ID)
                 if old_account_id is None:
                     errors["base"] = "account_id_missing"
-                elif str(old_account_id) != str(info["account_id"]):
+                elif _account_address(info, old_account_id) is None:
                     errors["base"] = "account_mismatch"
                 else:
                     username = info["username"].casefold()
@@ -334,12 +356,13 @@ class ConfigFlow(WaterHeatingFlow, config_entries.ConfigFlow, domain=DOMAIN):
                         errors["base"] = "already_configured"
                     else:
                         self._reconfigure_entry = entry
-                        self._entry_title = info["title"]
+                        address = _account_address(info, old_account_id)
+                        self._entry_title = f"№{old_account_id} {address}"
                         self._entry_data = {
                             CONF_USERNAME: info["username"],
                             CONF_PASSWORD: user_input[CONF_PASSWORD],
-                            CONF_ACCOUNT_ID: info["account_id"],
-                            CONF_ADDRESS: info["address"],
+                            CONF_ACCOUNT_ID: old_account_id,
+                            CONF_ADDRESS: address,
                         }
                         return await self.async_step_rate_type()
 

@@ -64,6 +64,61 @@ def test_different_entries_have_separate_devices() -> None:
     assert first_sensor.unique_id != second_sensor.unique_id
 
 
+def test_multiple_accounts_are_isolated_and_new_accounts_are_discovered() -> None:
+    def account(address, reading, rate):
+        return {"address": address, "meters": {"1": {"name": "Вода", "unit": "куб.м.", "value": reading}},
+                "tariffs": {"water": {"name": "Water", "unit": "куб.м.", "rate_per_unit": rate}}}
+
+    coordinator = _coordinator({"accounts": {"42": account("Адрес 1", 10, 20), "43": account("Адрес 2", 30, 40)}})
+    listener = []
+    coordinator.async_add_listener = lambda callback: listener.append(callback) or (lambda: None)
+    entry = SimpleNamespace(runtime_data=coordinator, options={}, async_on_unload=MagicMock())
+    add_entities = MagicMock()
+    asyncio.run(async_setup_entry(None, entry, add_entities))
+    entities = add_entities.call_args.args[0]
+    assert len(entities) == 8
+    assert len({entity.unique_id for entity in entities}) == 8
+    meters = {entity.account_id: entity for entity in entities if isinstance(entity, ZKHMeterSensor)}
+    tariffs = {entity.account_id: entity for entity in entities if isinstance(entity, ZKHTariffSensor)}
+    assert meters["42"].unique_id == "entry_meter_1"
+    assert meters["43"].unique_id == "entry_account_43_meter_1"
+    assert meters["42"].device_info == {"identifiers": {("zkhnso", "entry")}, "name": " №42 Адрес 1"}
+    assert meters["43"].device_info == {"identifiers": {("zkhnso", "entry_account_43")}, "name": " №43 Адрес 2"}
+    assert (meters["42"].native_value, meters["43"].native_value) == (10, 30)
+    assert (tariffs["42"].native_value, tariffs["43"].native_value) == (20, 40)
+    coordinator.data["accounts"]["43"] = account("Новый адрес", 31, 41)
+    assert meters["43"].native_value == 31
+    assert tariffs["43"].native_value == 41
+    assert meters["43"].device_info["name"] == " №43 Новый адрес"
+    coordinator.data["accounts"]["44"] = account("Адрес 3", 50, 60)
+    listener[0]()
+    assert len(add_entities.call_args.args[0]) == 4
+    listener[0]()
+    assert add_entities.call_count == 2
+    del coordinator.data["accounts"]["43"]
+    assert meters["43"].native_value is None
+
+
+def test_combined_tariffs_use_only_their_own_account() -> None:
+    coordinator = _coordinator({"accounts": {
+        "42": {"address": "Первый", "tariffs": {"w": _tariff("ВОДООТВЕДЕНИЕ", 5), "c": _tariff("ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ", 10)}},
+        "43": {"address": "Второй", "tariffs": {"w": _tariff("ВОДООТВЕДЕНИЕ", 20), "c": _tariff("ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ", 30)}},
+    }})
+    first = ZKHCombinedColdWaterTariffSensor(coordinator, "42", "Первый")
+    second = ZKHCombinedColdWaterTariffSensor(coordinator, "43", "Второй")
+    assert first.native_value == 15
+    assert second.native_value == 50
+    del coordinator.data["accounts"]["43"]
+    assert second.native_value is None
+
+
+def test_leading_zeroes_keep_existing_account_ids() -> None:
+    coordinator = _coordinator({"accounts": {"0042": {"address": "Адрес", "meters": {}}}})
+    sensor = ZKHMeterSensor(coordinator, "1", {}, "0042", "Адрес")
+    assert sensor.unique_id == "entry_meter_1"
+    assert sensor.device_info["identifiers"] == {("zkhnso", "entry")}
+
+
 @pytest.mark.parametrize("data,expected", [
     ({"account_id": 123, "address": "Адрес"}, " №123 Адрес"),
     ({"account_id": 0, "address": " Адрес "}, " №0  Адрес "),
