@@ -97,154 +97,38 @@ def test_reconfigure_form_does_not_expose_password(monkeypatch) -> None:
     assert not fields["password"].description
 
 
-def test_reconfigure_updates_existing_entry_and_reloads(monkeypatch) -> None:
-    """Keep entry identity and unrelated data while updating login and unique ID."""
+def test_reconfigure_updates_credentials_and_preserves_options(monkeypatch) -> None:
     import custom_components.zkhnso.config_flow as flow_module
 
-    flow, entry, manager = _reconfigure_flow(monkeypatch)
-    validate = AsyncMock(return_value={
-        "username": "New-User", "account_id": 123,
-        "address": "New address", "title": "№123 New address",
-    })
-    monkeypatch.setattr(flow_module, "validate_input", validate)
+    options = {"account_options": {"123": {"water_heating_rate": 0.05}}}
+    flow, entry, manager = _reconfigure_flow(monkeypatch, options=options)
+    monkeypatch.setattr(flow_module, "validate_input", AsyncMock(return_value={"username": "New-User", "title": "New-User"}))
     result = asyncio.run(flow.async_step_reconfigure({"username": "New-User", "password": "new-secret"}))
-
-    assert result["step_id"] == "rate_type"
-    manager.async_update_entry.assert_not_called()
-    manager.async_schedule_reload.assert_not_called()
-    result = asyncio.run(flow.async_step_rate_type({"rate_type": "none"}))
     assert result == {"reason": "reconfigure_successful"}
     kwargs = manager.async_update_entry.call_args.kwargs
-    assert kwargs["entry"] is entry
     assert kwargs["unique_id"] == "new-user"
-    assert kwargs["title"] == "№123 New address"
-    assert kwargs["data"] == {
-        "username": "New-User", "password": "new-secret", "account_id": 123,
-        "address": "New address", "extra": "preserve",
-    }
-    assert kwargs["options"] == {"rate_type": "none", "water_heating_rate": None}
-    manager.async_schedule_reload.assert_called_once_with("entry-1")
-
-
-def test_reconfigure_manual_prefills_saved_auto_rate(monkeypatch) -> None:
-    """Reconfiguration suggests the active auto rate rather than an older manual rate."""
-    import custom_components.zkhnso.config_flow as flow_module
-
-    options = {"rate_type": "auto", "water_heating_rate": 0.06528, "manual_rate": "0.04"}
-    flow, entry, manager = _reconfigure_flow(monkeypatch, options=options)
-    monkeypatch.setattr(flow_module, "validate_input", AsyncMock(return_value={
-        "username": "New-User", "account_id": 123, "address": "New address", "title": "Account",
-    }))
-    asyncio.run(flow.async_step_reconfigure({"username": "New-User", "password": "secret"}))
-    form = asyncio.run(flow.async_step_rate_type({"rate_type": "manual"}))
-    assert form["step_id"] == "rate_manual"
-    field = next(key for key in form["data_schema"].schema if key.schema == "manual_rate")
-    assert field.description["suggested_value"] == "0.06528"
+    assert kwargs["title"] == "New-User"
+    assert kwargs["data"]["username"] == "New-User"
+    assert kwargs["data"]["password"] == "new-secret"
+    assert kwargs["data"]["account_id"] == 123
     assert entry.options == options
-    manager.async_update_entry.assert_not_called()
-    result = asyncio.run(flow.async_step_rate_manual({"manual_rate": "0.06528"}))
-    assert result == {"reason": "reconfigure_successful"}
-    assert manager.async_update_entry.call_args.kwargs["options"]["water_heating_rate"] == 0.06528
     manager.async_schedule_reload.assert_called_once_with("entry-1")
 
 
-def test_reconfigure_preserves_original_account_when_selection_changes(monkeypatch) -> None:
+def test_reauth_updates_credentials_preserving_legacy_data(monkeypatch) -> None:
     import custom_components.zkhnso.config_flow as flow_module
 
-    flow, entry, manager = _reconfigure_flow(monkeypatch)
-    monkeypatch.setattr(flow_module, "validate_input", AsyncMock(return_value={
-        "username": "New-User", "account_id": 456, "address": "Second", "title": "№456 Second",
-        "accounts": {"123": "Updated first", "456": "Second"},
-    }))
-    form = asyncio.run(flow.async_step_reconfigure({"username": "New-User", "password": "secret"}))
-    assert form["step_id"] == "rate_type"
-    asyncio.run(flow.async_step_rate_type({"rate_type": "none"}))
-    updated = manager.async_update_entry.call_args.kwargs
-    assert updated["data"]["account_id"] == 123
-    assert updated["data"]["address"] == "Updated first"
-    assert updated["title"] == "№123 Updated first"
-
-
-@pytest.mark.parametrize("accounts,success", [
-    ({"00123": "First", "456": "Second"}, True),
-    ({"456": "Second"}, False),
-])
-def test_reauth_preserves_original_account(monkeypatch, accounts, success) -> None:
-    import custom_components.zkhnso.config_flow as flow_module
-
-    entry = SimpleNamespace(entry_id="entry", data={"account_id": 123, "address": "Old"})
+    entry = SimpleNamespace(entry_id="entry", data={"username": "old", "account_id": 123})
     manager = SimpleNamespace(async_update_entry=MagicMock(), async_reload=AsyncMock())
     flow = ConfigFlow()
     flow.hass = SimpleNamespace(config_entries=manager)
     monkeypatch.setattr(flow, "_get_reauth_entry", lambda: entry)
     monkeypatch.setattr(flow, "async_abort", lambda **kwargs: kwargs)
-    monkeypatch.setattr(flow, "async_show_form", lambda **kwargs: kwargs)
-    monkeypatch.setattr(flow_module, "validate_input", AsyncMock(return_value={
-        "username": "user", "account_id": 456, "address": "Second", "title": "Second", "accounts": accounts,
-    }))
+    monkeypatch.setattr(flow_module, "validate_input", AsyncMock(return_value={"username": "user"}))
     result = asyncio.run(flow.async_step_reauth_confirm({"username": "user", "password": "pass"}))
-    if success:
-        assert result == {"reason": "reauth_successful"}
-        assert manager.async_update_entry.call_args.kwargs["data"]["account_id"] == 123
-        assert manager.async_update_entry.call_args.kwargs["data"]["address"] == "First"
-        manager.async_reload.assert_awaited_once_with("entry")
-    else:
-        assert result["errors"] == {"base": "account_parse_error"}
-        manager.async_update_entry.assert_not_called()
-        manager.async_reload.assert_not_awaited()
-
-
-@pytest.mark.parametrize("rate_type", ["none", "manual", "auto"])
-def test_reconfigure_collects_and_saves_heating_options(monkeypatch, rate_type) -> None:
-    """Reconfigure preserves existing options and saves only after the final step."""
-    import custom_components.zkhnso.config_flow as flow_module
-
-    existing_options = {
-        "other": 42, "rate_type": "manual", "manual_rate": "0.04", "water_heating_rate": 0.04,
-        "building_features": "insulated_without_towel_rails", "heating_system": "closed_external",
-    }
-    flow, entry, manager = _reconfigure_flow(monkeypatch, options=existing_options)
-    monkeypatch.setattr(flow_module, "validate_input", AsyncMock(return_value={
-        "username": "New-User", "account_id": 123, "address": "New address", "title": "Account",
-    }))
-    form = asyncio.run(flow.async_step_reconfigure({"username": "New-User", "password": "secret"}))
-    assert form["step_id"] == "rate_type"
-    assert next(key for key in form["data_schema"].schema if key.schema == "rate_type").description["suggested_value"] == "manual"
-    assert entry.options == existing_options
-    manager.async_update_entry.assert_not_called()
-
-    result = asyncio.run(flow.async_step_rate_type({"rate_type": rate_type}))
-    if rate_type == "manual":
-        assert result["step_id"] == "rate_manual"
-        assert next(key for key in result["data_schema"].schema if key.schema == "manual_rate").description["suggested_value"] == "0.04"
-        invalid = asyncio.run(flow.async_step_rate_manual({"manual_rate": "invalid"}))
-        assert invalid["errors"] == {"base": "invalid_rate"}
-        manager.async_update_entry.assert_not_called()
-        result = asyncio.run(flow.async_step_rate_manual({"manual_rate": "0,05"}))
-    elif rate_type == "auto":
-        assert result["step_id"] == "rate_auto"
-        suggested = {key.schema: key.description["suggested_value"] for key in result["data_schema"].schema}
-        assert suggested == {"heating_system": "closed_external", "building_features": "insulated_without_towel_rails"}
-        invalid = asyncio.run(flow.async_step_rate_auto({"heating_system": "bad", "building_features": "bad"}))
-        assert invalid["errors"] == {"base": "invalid_selection"}
-        manager.async_update_entry.assert_not_called()
-        result = asyncio.run(flow.async_step_rate_auto({
-            "heating_system": "closed_external", "building_features": "insulated_without_towel_rails",
-        }))
-        assert result["step_id"] == "rate_confirm"
-        assert result["description_placeholders"] == {"rate": "0.05775"}
-        manager.async_update_entry.assert_not_called()
-        manager.async_schedule_reload.assert_not_called()
-        result = asyncio.run(flow.async_step_rate_confirm({}))
-
-    assert result == {"reason": "reconfigure_successful"}
-    manager.async_update_entry.assert_called_once()
-    updated_options = manager.async_update_entry.call_args.kwargs["options"]
-    assert updated_options["other"] == 42
-    assert updated_options["rate_type"] == rate_type
-    assert updated_options["water_heating_rate"] == {"none": None, "manual": 0.05, "auto": 0.05775}[rate_type]
-    assert entry.options == existing_options
-    manager.async_schedule_reload.assert_called_once_with("entry-1")
+    assert result == {"reason": "reauth_successful"}
+    assert manager.async_update_entry.call_args.kwargs["data"] == {"username": "user", "password": "pass", "account_id": 123}
+    manager.async_reload.assert_awaited_once_with("entry")
 
 
 @pytest.mark.parametrize(
@@ -264,25 +148,15 @@ def test_reconfigure_validation_errors_leave_entry_unchanged(monkeypatch, failur
     manager.async_schedule_reload.assert_not_called()
 
 
-@pytest.mark.parametrize(
-    ("account_id", "new_account_id", "other_entries", "error"),
-    [
-        (123, 456, (), "account_mismatch"),
-        (None, 123, (), "account_id_missing"),
-        (123, 123, (SimpleNamespace(entry_id="other", unique_id="new-user", data={}),), "already_configured"),
-        (123, 123, (SimpleNamespace(entry_id="other", unique_id="legacy", data={"username": "NEW-USER"}),), "already_configured"),
-    ],
-)
-def test_reconfigure_rejects_unsafe_changes(monkeypatch, account_id, new_account_id, other_entries, error) -> None:
-    """Do not switch accounts or allow a duplicate username."""
+@pytest.mark.parametrize("other", [
+    SimpleNamespace(entry_id="other", unique_id="new-user", data={}),
+    SimpleNamespace(entry_id="other", unique_id="legacy", data={"username": "NEW-USER"}),
+])
+def test_reconfigure_rejects_duplicate_username(monkeypatch, other) -> None:
     import custom_components.zkhnso.config_flow as flow_module
 
-    flow, _, manager = _reconfigure_flow(monkeypatch, account_id, other_entries)
-    monkeypatch.setattr(flow_module, "validate_input", AsyncMock(return_value={
-        "username": "New-User", "account_id": new_account_id,
-        "address": "Address", "title": "Account",
-    }))
+    flow, _, manager = _reconfigure_flow(monkeypatch, other_entries=(other,))
+    monkeypatch.setattr(flow_module, "validate_input", AsyncMock(return_value={"username": "New-User"}))
     result = asyncio.run(flow.async_step_reconfigure({"username": "New-User", "password": "pass"}))
-    assert result["errors"] == {"base": error}
+    assert result["errors"] == {"base": "already_configured"}
     manager.async_update_entry.assert_not_called()
-    manager.async_schedule_reload.assert_not_called()

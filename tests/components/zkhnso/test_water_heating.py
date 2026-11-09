@@ -30,7 +30,8 @@ def test_rate_table(system_index, feature_index):
 
 def _options_flow(monkeypatch, options=None):
     flow = ZKHOptionsFlow()
-    flow._config_entry = SimpleNamespace(options=options or {})
+    flow._config_entry = SimpleNamespace(options={"account_options": {"42": options or {}}}, runtime_data=SimpleNamespace(data={"accounts": {"42": {"address": "Адрес"}}}))
+    flow._selected_account = "42"
     monkeypatch.setattr(flow, "async_show_form", lambda **kwargs: kwargs)
     monkeypatch.setattr(flow, "async_create_entry", lambda **kwargs: kwargs)
     return flow
@@ -43,22 +44,51 @@ def _suggested(form):
     }
 
 
+def test_options_select_account_and_keep_rates_separate(monkeypatch):
+    flow = ZKHOptionsFlow()
+    old = {"water_heating_rate": 0.1, "rate_type": "auto", "other": 5,
+           "account_options": {"43": {"rate_type": "manual", "water_heating_rate": 0.08}}}
+    flow._config_entry = SimpleNamespace(options=old, runtime_data=SimpleNamespace(data={"accounts": {
+        "42": {"address": "Первый"}, "43": {"address": "Второй"},
+    }}))
+    monkeypatch.setattr(flow, "async_show_form", lambda **kwargs: kwargs)
+    monkeypatch.setattr(flow, "async_create_entry", lambda **kwargs: kwargs)
+    assert asyncio.run(flow.async_step_init())["step_id"] == "init"
+    assert asyncio.run(flow.async_step_init({"account_id": "missing"}))["errors"] == {"base": "invalid_account"}
+    form = asyncio.run(flow.async_step_init({"account_id": "42"}))
+    assert form["step_id"] == "rate_type_unset"
+    asyncio.run(flow.async_step_rate_type({"rate_type": "manual"}))
+    result = asyncio.run(flow.async_step_rate_manual({"manual_rate": "0.04"}))
+    assert result["data"]["account_options"]["42"]["water_heating_rate"] == 0.04
+    assert result["data"]["account_options"]["43"]["water_heating_rate"] == 0.08
+    assert result["data"]["water_heating_rate"] == 0.1
+    assert result["data"]["other"] == 5
+    assert old["water_heating_rate"] == 0.1
+
+
+def test_options_without_accounts_aborts(monkeypatch):
+    flow = ZKHOptionsFlow()
+    flow._config_entry = SimpleNamespace(options={}, runtime_data=SimpleNamespace(data={"accounts": {}}))
+    monkeypatch.setattr(flow, "async_abort", lambda **kwargs: kwargs)
+    assert asyncio.run(flow.async_step_init()) == {"reason": "no_accounts"}
+
+
 def test_options_none_and_existing_options(monkeypatch):
     """None clears the effective rate and preserves unrelated options."""
     flow = _options_flow(monkeypatch, {"other": 42, "water_heating_rate": 1, "rate_type": "manual"})
-    first = asyncio.run(flow.async_step_init())
+    first = asyncio.run(flow.async_step_rate_type())
     assert first["step_id"] == "rate_type"
     assert _suggested(first)["rate_type"] == "manual"
     result = asyncio.run(flow.async_step_rate_type({"rate_type": "none"}))
-    assert result["data"]["water_heating_rate"] is None
-    assert result["data"]["other"] == 42
+    assert result["data"]["account_options"]["42"]["water_heating_rate"] is None
+    assert result["data"]["account_options"]["42"]["other"] == 42
 
 
 @pytest.mark.parametrize("rate", [0.06528, 0, 0.123456789])
 def test_options_show_saved_rate_below_type(monkeypatch, rate):
     """Display the saved rate without rounding, including zero."""
     flow = _options_flow(monkeypatch, {"water_heating_rate": rate, "rate_type": "manual"})
-    form = asyncio.run(flow.async_step_init())
+    form = asyncio.run(flow.async_step_rate_type())
     assert form["step_id"] == "rate_type"
     assert form["description_placeholders"] == {"rate": str(rate)}
     assert _suggested(form)["rate_type"] == "manual"
@@ -78,7 +108,7 @@ def test_options_show_saved_rate_below_type(monkeypatch, rate):
 def test_options_show_unset_and_handle_submission(monkeypatch, options):
     """Old and unset entries show a translated helper and can still be saved."""
     flow = _options_flow(monkeypatch, options)
-    form = asyncio.run(flow.async_step_init())
+    form = asyncio.run(flow.async_step_rate_type())
     assert form["step_id"] == "rate_type_unset"
     for language, expected in (("ru", "Текущий норматив — не задан"), ("en", "Current rate — not set")):
         translation = json.loads(
@@ -86,7 +116,7 @@ def test_options_show_unset_and_handle_submission(monkeypatch, options):
         )
         assert translation["options"]["step"][form["step_id"]]["data_description"]["rate_type"] == expected
     result = asyncio.run(flow.async_step_rate_type_unset({"rate_type": "none"}))
-    assert result["data"]["water_heating_rate"] is None
+    assert result["data"]["account_options"]["42"]["water_heating_rate"] is None
 
 
 @pytest.mark.parametrize("system", SYSTEMS)
@@ -97,7 +127,7 @@ def test_auto_summary_and_selections_are_restored(monkeypatch, system, features)
         "rate_type": "auto", "water_heating_rate": water_heating_rate(system, features),
         "heating_system": system, "building_features": features,
     })
-    form = asyncio.run(flow.async_step_init())
+    form = asyncio.run(flow.async_step_rate_type())
     assert form["description_placeholders"] == {"rate": str(water_heating_rate(system, features))}
     assert _suggested(form)["rate_type"] == "auto"
     auto_form = asyncio.run(flow.async_step_rate_type({"rate_type": "auto"}))
@@ -117,7 +147,7 @@ def test_summary_hides_stale_auto_selections(monkeypatch, rate_type):
         "rate_type": rate_type, "water_heating_rate": 0.05 if rate_type == "manual" else None,
         "heating_system": SYSTEMS[0], "building_features": BUILDING_FEATURES[0],
     })
-    form = asyncio.run(flow.async_step_init())
+    form = asyncio.run(flow.async_step_rate_type())
     if rate_type == "none":
         assert form["step_id"] == "rate_type_unset"
         assert form["description_placeholders"] is None
@@ -133,7 +163,7 @@ def test_summary_uses_only_saved_options(monkeypatch):
         "heating_system": SYSTEMS[0], "building_features": BUILDING_FEATURES[0],
     })
     asyncio.run(flow.async_step_rate_auto({"heating_system": SYSTEMS[1], "building_features": BUILDING_FEATURES[3]}))
-    summary = asyncio.run(flow.async_step_init())["description_placeholders"]
+    summary = asyncio.run(flow.async_step_rate_type())["description_placeholders"]
     assert summary == {"rate": "0.06779"}
 
 
@@ -163,9 +193,9 @@ def test_options_manual_validation_and_restore(monkeypatch):
     for value in ("x", "-1", "nan", "inf", ""):
         assert asyncio.run(flow.async_step_rate_manual({"manual_rate": value}))["errors"] == {"base": "invalid_rate"}
     result = asyncio.run(flow.async_step_rate_manual({"manual_rate": "0,06277"}))
-    assert result["data"]["water_heating_rate"] == 0.06277
-    reopened = _options_flow(monkeypatch, result["data"])
-    assert _suggested(asyncio.run(reopened.async_step_init()))["rate_type"] == "manual"
+    assert result["data"]["account_options"]["42"]["water_heating_rate"] == 0.06277
+    reopened = _options_flow(monkeypatch, result["data"]["account_options"]["42"])
+    assert _suggested(asyncio.run(reopened.async_step_rate_type()))["rate_type"] == "manual"
     assert _suggested(asyncio.run(reopened.async_step_rate_type({"rate_type": "manual"})))["manual_rate"] == "0,06277"
 
 
@@ -187,9 +217,9 @@ def test_options_manual_prefills_saved_auto_rate(monkeypatch, rate, old_manual):
     assert invalid["errors"] == {"base": "invalid_rate"}
     assert _suggested(invalid)["manual_rate"] == "bad"
     result = asyncio.run(flow.async_step_rate_manual({"manual_rate": str(rate)}))
-    assert result["data"]["rate_type"] == "manual"
-    assert result["data"]["water_heating_rate"] == rate
-    assert result["data"]["other"] == 42
+    assert result["data"]["account_options"]["42"]["rate_type"] == "manual"
+    assert result["data"]["account_options"]["42"]["water_heating_rate"] == rate
+    assert result["data"]["account_options"]["42"]["other"] == 42
 
 
 def test_options_auto_without_rate_does_not_prefill_manual(monkeypatch):
@@ -207,8 +237,8 @@ def test_options_auto_confirm_and_restore(monkeypatch):
     assert preview["step_id"] == "rate_confirm"
     assert preview["description_placeholders"]["rate"] == "0.05775"
     result = asyncio.run(flow.async_step_rate_confirm({}))
-    assert result["data"]["water_heating_rate"] == 0.05775
-    reopened = _options_flow(monkeypatch, result["data"])
+    assert result["data"]["account_options"]["42"]["water_heating_rate"] == 0.05775
+    reopened = _options_flow(monkeypatch, result["data"]["account_options"]["42"])
     form = asyncio.run(reopened.async_step_rate_type({"rate_type": "auto"}))
     assert _suggested(form) == selection
 
@@ -219,36 +249,15 @@ def test_invalid_selections_do_not_save(monkeypatch):
     assert asyncio.run(flow.async_step_rate_auto({"heating_system": "bad", "building_features": "bad"}))["errors"] == {"base": "invalid_selection"}
 
 
-@pytest.mark.parametrize("rate_type", ["none", "manual", "auto"])
-def test_initial_setup_collects_rate_after_credentials(monkeypatch, rate_type):
-    """Do not create an entry until credentials and a rate choice are complete."""
-    import custom_components.zkhnso.config_flow as flow_module
-
+def test_initial_setup_only_asks_for_credentials(monkeypatch):
     flow = ConfigFlow()
     flow.hass = None
-    monkeypatch.setattr(flow_module, "validate_input", AsyncMock(return_value={
-        "username": "user", "account_id": 123, "address": "address", "title": "account",
-    }))
+    monkeypatch.setattr(flow_module, "validate_input", AsyncMock(return_value={"username": "user", "title": "user"}))
     monkeypatch.setattr(flow, "async_set_unique_id", AsyncMock())
     monkeypatch.setattr(flow, "_abort_if_unique_id_configured", MagicMock())
-    monkeypatch.setattr(flow, "async_show_form", lambda **kwargs: kwargs)
-    create = MagicMock(side_effect=lambda **kwargs: kwargs)
-    monkeypatch.setattr(flow, "async_create_entry", create)
+    monkeypatch.setattr(flow, "async_create_entry", lambda **kwargs: kwargs)
     result = asyncio.run(flow.async_step_user({"username": "user", "password": "secret"}))
-    assert result["step_id"] == "rate_type"
-    create.assert_not_called()
-    result = asyncio.run(flow.async_step_rate_type({"rate_type": rate_type}))
-    if rate_type == "manual":
-        assert result["step_id"] == "rate_manual"
-        result = asyncio.run(flow.async_step_rate_manual({"manual_rate": "0.05"}))
-    elif rate_type == "auto":
-        assert result["step_id"] == "rate_auto"
-        result = asyncio.run(flow.async_step_rate_auto({"heating_system": SYSTEMS[0], "building_features": BUILDING_FEATURES[0]}))
-        assert result["step_id"] == "rate_confirm"
-        result = asyncio.run(flow.async_step_rate_confirm({}))
-    assert result["data"]["username"] == "user"
-    assert result["options"]["rate_type"] == rate_type
-    assert result["options"]["water_heating_rate"] == {"none": None, "manual": 0.05, "auto": 0.06779}[rate_type]
+    assert result == {"title": "user", "data": {"username": "user", "password": "secret"}}
 
 
 def test_options_update_reloads_entry():
@@ -261,7 +270,7 @@ def test_options_update_reloads_entry():
 def test_sensor_setup_with_configured_rate():
     """A configured heating rate does not prevent tariff sensor creation."""
     entry = SimpleNamespace(
-        entry_id="entry", data={"account_id": 42}, options={"water_heating_rate": 0.06528}
+        entry_id="entry", data={"account_id": 42}, options={"account_options": {"42": {"water_heating_rate": 0.06528}}}
     )
     entry.runtime_data = SimpleNamespace(
         entry=entry,

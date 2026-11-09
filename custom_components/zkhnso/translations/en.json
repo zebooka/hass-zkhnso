@@ -1,32 +1,6 @@
 {
   "config": {
     "step": {
-      "rate_type": {
-        "title": "Water heating rate",
-        "description": "Choose how to set the heat consumption rate for cold water heating.",
-        "data": {
-          "rate_type": "Type"
-        }
-      },
-      "rate_manual": {
-        "title": "Cold water heating rate",
-        "description": "Enter the rate in Gcal/m³.",
-        "data": {
-          "manual_rate": "Rate, Gcal/m³"
-        }
-      },
-      "rate_auto": {
-        "title": "Calculate water heating rate",
-        "description": "Choose the hot water system and building features.",
-        "data": {
-          "heating_system": "Hot water system type",
-          "building_features": "Building features"
-        }
-      },
-      "rate_confirm": {
-        "title": "Confirm the rate",
-        "description": "Calculated rate: {rate} Gcal/m³. Confirm your selection."
-      },
       "user": {
         "title": "ZKHNSO Configuration",
         "description": "Enter your ZKHNSO credentials",
@@ -53,14 +27,9 @@
       }
     },
     "error": {
-      "invalid_rate_type": "Select a rate type",
-      "invalid_rate": "Enter a finite non-negative number",
-      "invalid_selection": "Select a valid system and building features",
       "cannot_connect": "Unable to connect to ZKHNSO",
       "invalid_auth": "Invalid authentication",
       "account_parse_error": "Unable to determine the account number or address",
-      "account_id_missing": "The existing entry has no account number, so it cannot be verified",
-      "account_mismatch": "The credentials belong to a different account",
       "already_configured": "This username is already used by another ZKHNSO entry",
       "unknown": "Unexpected error occurred"
     },
@@ -72,6 +41,13 @@
   },
   "options": {
     "step": {
+      "init": {
+        "title": "Select a device",
+        "description": "Select the utility account whose water heating rate you want to configure.",
+        "data": {
+          "account_id": "Utility account"
+        }
+      },
       "rate_type": {
         "title": "Water heating rate",
         "description": "Choose how to set the heat consumption rate for water heating.",
@@ -115,7 +91,11 @@
     "error": {
       "invalid_rate_type": "Select a rate type",
       "invalid_rate": "Enter a finite non-negative number",
-      "invalid_selection": "Select a valid system and building features"
+      "invalid_selection": "Select a valid system and building features",
+      "invalid_account": "Select an available utility account"
+    },
+    "abort": {
+      "no_accounts": "No utility accounts are available for configuration"
     }
   },
   "selector": {

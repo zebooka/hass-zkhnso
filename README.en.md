@@ -54,7 +54,7 @@ Use the username and password from your ZKHNSO personal account. Credentials are
 - Retrieves active meters, including serial number, meter type, next verification date, current reading, and the date of the most recent reading submission.
 - Retrieves tariffs and usage norms.
 
-Data is updated once per hour. The integration creates a separate device with meter and tariff sensors for each utility account associated with the login. New addresses and sensors are discovered during updates. The water heating rate setting applies to all addresses in the integration entry.
+Data is updated once per hour. The integration creates a separate device with meter and tariff sensors for each utility account associated with the login. New addresses and sensors are discovered during updates. Configure the water heating rate separately for each address by selecting its utility account in the integration options. The former shared rate must be configured again.
 
 ## Calculating meter costs
 

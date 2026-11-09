@@ -19,7 +19,7 @@ from homeassistant.helpers.selector import (
 from .api_client import ZKHAPIClient, ZKHAPIConnectionError
 from .const import (
     CONF_ACCOUNT_ID,
-    CONF_ADDRESS,
+    CONF_ACCOUNT_OPTIONS,
     CONF_BUILDING_FEATURES,
     CONF_HEATING_SYSTEM,
     CONF_MANUAL_RATE,
@@ -81,16 +81,6 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
     }
 
 
-def _account_address(info: dict[str, Any], account_id: Any) -> str | None:
-    """Find an existing account even when its table number has leading zeroes."""
-    accounts = info.get("accounts", {str(info["account_id"]): info["address"]})
-    requested = str(account_id)
-    for number, address in accounts.items():
-        if number == requested or (number.isdecimal() and requested.isdecimal() and int(number) == int(requested)):
-            return address
-    return None
-
-
 def _select(options: tuple[str, ...], translation_key: str) -> SelectSelector:
     return SelectSelector(SelectSelectorConfig(
         options=list(options), mode=SelectSelectorMode.DROPDOWN,
@@ -99,7 +89,7 @@ def _select(options: tuple[str, ...], translation_key: str) -> SelectSelector:
 
 
 class WaterHeatingFlow:
-    """Shared multi-step water heating configuration for setup and options."""
+    """Multi-step water heating configuration for an account."""
 
     def _heating_options(self) -> dict[str, Any]:
         if not hasattr(self, "_rate_options"):
@@ -143,7 +133,7 @@ class WaterHeatingFlow:
         }), errors)
 
     def _rate_type_form(self, schema: vol.Schema, errors: dict[str, str]):
-        """Show the rate type form during initial setup."""
+        """Show the rate type form."""
         return self._rate_form("rate_type", schema, errors)
 
     async def async_step_rate_manual(self, user_input=None):
@@ -200,16 +190,10 @@ class WaterHeatingFlow:
         )
 
 
-class ConfigFlow(WaterHeatingFlow, config_entries.ConfigFlow, domain=DOMAIN):
+class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for ZKH."""
 
     VERSION = 1
-
-    def _existing_heating_options(self) -> dict[str, Any]:
-        """Restore the saved options when reconfiguring an existing entry."""
-        if hasattr(self, "_reconfigure_entry"):
-            return dict(self._reconfigure_entry.options)
-        return {}
 
     async def _async_step_credentials(
         self, user_input: dict[str, Any] | None, *, reauth: bool = False
@@ -238,25 +222,13 @@ class ConfigFlow(WaterHeatingFlow, config_entries.ConfigFlow, domain=DOMAIN):
             entry_data = {
                 CONF_USERNAME: info["username"],
                 CONF_PASSWORD: user_input[CONF_PASSWORD],
-                CONF_ACCOUNT_ID: info["account_id"],
-                CONF_ADDRESS: info["address"],
             }
             if reauth:
                 old_entry = self._get_reauth_entry()
-                old_id = old_entry.data.get(CONF_ACCOUNT_ID)
-                address = _account_address(info, old_id)
-                if old_id is not None and address is None:
-                    return self.async_show_form(
-                        step_id="reauth_confirm", data_schema=STEP_USER_DATA_SCHEMA,
-                        errors={"base": "account_parse_error"},
-                    )
-                if old_id is not None:
-                    entry_data[CONF_ACCOUNT_ID] = old_id
-                    entry_data[CONF_ADDRESS] = address
                 self.hass.config_entries.async_update_entry(
                     old_entry,
-                    data=entry_data,
-                    title=f"№{entry_data[CONF_ACCOUNT_ID]} {entry_data[CONF_ADDRESS]}",
+                    data={**old_entry.data, **entry_data},
+                    title=info["username"],
                 )
                 await self.hass.config_entries.async_reload(
                     self._get_reauth_entry().entry_id
@@ -265,9 +237,7 @@ class ConfigFlow(WaterHeatingFlow, config_entries.ConfigFlow, domain=DOMAIN):
 
             await self.async_set_unique_id(info["username"].casefold())
             self._abort_if_unique_id_configured()
-            self._entry_data = entry_data
-            self._entry_title = info["title"]
-            return await self.async_step_rate_type()
+            return self.async_create_entry(title=info["username"], data=entry_data)
 
         return self.async_show_form(
             step_id="reauth_confirm" if reauth else "user",
@@ -285,21 +255,6 @@ class ConfigFlow(WaterHeatingFlow, config_entries.ConfigFlow, domain=DOMAIN):
     def async_get_options_flow(config_entry: config_entries.ConfigEntry):
         """Provide an options flow for an existing integration entry."""
         return ZKHOptionsFlow()
-
-    async def _finish_water_heating(self):
-        """Save the entry only after the heating rate has been selected."""
-        if hasattr(self, "_reconfigure_entry"):
-            return self.async_update_reload_and_abort(
-                self._reconfigure_entry,
-                unique_id=self._entry_data[CONF_USERNAME].casefold(),
-                title=self._entry_title,
-                data_updates=self._entry_data,
-                options=self._heating_options(),
-            )
-        self._abort_if_unique_id_configured()
-        return self.async_create_entry(
-            title=self._entry_title, data=self._entry_data, options=self._heating_options()
-        )
 
     async def async_step_reauth(
         self, entry_data: dict[str, Any]
@@ -319,7 +274,7 @@ class ConfigFlow(WaterHeatingFlow, config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_reconfigure(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Update credentials for the same account without replacing the entry."""
+        """Update credentials without replacing the entry."""
         entry = self._get_reconfigure_entry()
         errors = {}
 
@@ -336,34 +291,19 @@ class ConfigFlow(WaterHeatingFlow, config_entries.ConfigFlow, domain=DOMAIN):
                 _LOGGER.exception("Unexpected exception during reconfiguration")
                 errors["base"] = "unknown"
             else:
-                old_account_id = entry.data.get(CONF_ACCOUNT_ID)
-                if old_account_id is None:
-                    errors["base"] = "account_id_missing"
-                elif _account_address(info, old_account_id) is None:
-                    errors["base"] = "account_mismatch"
+                username = info["username"].casefold()
+                other_entries = self.hass.config_entries.async_entries(DOMAIN)
+                if any(
+                    other.entry_id != entry.entry_id
+                    and (other.unique_id == username or str(other.data.get(CONF_USERNAME, "")).casefold() == username)
+                    for other in other_entries
+                ):
+                    errors["base"] = "already_configured"
                 else:
-                    username = info["username"].casefold()
-                    other_entries = self.hass.config_entries.async_entries(DOMAIN)
-                    if any(
-                        other.entry_id != entry.entry_id
-                        and (
-                            other.unique_id == username
-                            or str(other.data.get(CONF_USERNAME, "")).casefold() == username
-                        )
-                        for other in other_entries
-                    ):
-                        errors["base"] = "already_configured"
-                    else:
-                        self._reconfigure_entry = entry
-                        address = _account_address(info, old_account_id)
-                        self._entry_title = f"№{old_account_id} {address}"
-                        self._entry_data = {
-                            CONF_USERNAME: info["username"],
-                            CONF_PASSWORD: user_input[CONF_PASSWORD],
-                            CONF_ACCOUNT_ID: old_account_id,
-                            CONF_ADDRESS: address,
-                        }
-                        return await self.async_step_rate_type()
+                    return self.async_update_reload_and_abort(
+                        entry, unique_id=username, title=info["username"],
+                        data_updates={CONF_USERNAME: info["username"], CONF_PASSWORD: user_input[CONF_PASSWORD]},
+                    )
 
         return self.async_show_form(
             step_id="reconfigure",
@@ -379,11 +319,13 @@ class ZKHOptionsFlow(WaterHeatingFlow, config_entries.OptionsFlow):
     """Manage water heating options for an existing entry."""
 
     def _existing_heating_options(self) -> dict[str, Any]:
-        return dict(self.config_entry.options)
+        options = self.config_entry.options
+        per_account = options.get(CONF_ACCOUNT_OPTIONS, {})
+        return dict(per_account.get(self._selected_account, {}))
 
     def _rate_type_form(self, schema: vol.Schema, errors: dict[str, str]):
         """Display the saved configuration below the type selector."""
-        options = self.config_entry.options
+        options = self._existing_heating_options()
         rate = options.get(CONF_WATER_HEATING_RATE)
 
         if rate is None:
@@ -392,14 +334,34 @@ class ZKHOptionsFlow(WaterHeatingFlow, config_entries.OptionsFlow):
         return self._rate_form("rate_type", schema, errors, {"rate": str(rate)})
 
     async def async_step_init(self, user_input=None):
-        return await self.async_step_rate_type(user_input)
+        coordinator = self.config_entry.runtime_data
+        data = coordinator.data or {}
+        accounts = data.get("accounts", {})
+        if not accounts:
+            return self.async_abort(reason="no_accounts")
+        if user_input is not None:
+            account_id = user_input.get(CONF_ACCOUNT_ID)
+            if account_id in accounts:
+                self._selected_account = account_id
+                return await self.async_step_rate_type()
+            errors = {"base": "invalid_account"}
+        else:
+            errors = {}
+        choices = [{"value": account_id, "label": f"№{account_id} {account.get('address', '')}"} for account_id, account in accounts.items()]
+        return self.async_show_form(
+            step_id="init", data_schema=vol.Schema({vol.Required(CONF_ACCOUNT_ID): SelectSelector(SelectSelectorConfig(options=choices, mode=SelectSelectorMode.DROPDOWN))}), errors=errors,
+        )
 
     async def async_step_rate_type_unset(self, user_input=None):
         """Handle the rate type form when no rate has been saved."""
         return await self.async_step_rate_type(user_input)
 
     async def _finish_water_heating(self):
-        return self.async_create_entry(data=self._heating_options())
+        options = dict(self.config_entry.options)
+        per_account = dict(options.get(CONF_ACCOUNT_OPTIONS, {}))
+        per_account[self._selected_account] = dict(self._heating_options())
+        options[CONF_ACCOUNT_OPTIONS] = per_account
+        return self.async_create_entry(data=options)
 
 
 class CannotConnect(HomeAssistantError):

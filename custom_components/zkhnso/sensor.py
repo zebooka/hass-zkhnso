@@ -16,7 +16,7 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import CONF_ACCOUNT_ID, CONF_ADDRESS, CONF_WATER_HEATING_RATE, DOMAIN
+from .const import CONF_ACCOUNT_ID, CONF_ACCOUNT_OPTIONS, CONF_WATER_HEATING_RATE, DOMAIN
 from .coordinator import ZKHDataUpdateCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -59,7 +59,8 @@ async def async_setup_entry(
                         known.add(identity)
             if account.get("tariffs") and (account_id, "combined", "water") not in known:
                 entities.append(ZKHCombinedColdWaterTariffSensor(coordinator, account_id))
-                entities.append(ZKHCombinedHotWaterTariffSensor(coordinator, entry.options.get(CONF_WATER_HEATING_RATE), account_id))
+                account_options = entry.options.get(CONF_ACCOUNT_OPTIONS, {}).get(account_id, {})
+                entities.append(ZKHCombinedHotWaterTariffSensor(coordinator, account_options.get(CONF_WATER_HEATING_RATE), account_id))
                 known.add((account_id, "combined", "water"))
         if entities:
             async_add_entities(entities, update_before_add=False)

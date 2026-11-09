@@ -499,9 +499,21 @@ def test_setup_passes_heating_rate_to_combined_hot_water_sensor() -> None:
         "fluid": _tariff("ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ", 10),
         "heating": _tariff("ОТОПЛЕНИЕ", 1000, unit="Гкал"),
     }})
-    entry = SimpleNamespace(runtime_data=coordinator, options={"water_heating_rate": 0.05})
+    entry = SimpleNamespace(runtime_data=coordinator, options={"account_options": {"42": {"water_heating_rate": 0.05}}})
     add_entities = MagicMock()
     asyncio.run(async_setup_entry(None, entry, add_entities))
     entities = add_entities.call_args.args[0]
     sensor = next(entity for entity in entities if isinstance(entity, ZKHCombinedHotWaterTariffSensor))
     assert sensor.native_value == 65
+
+
+def test_heating_rate_is_independent_per_account_and_ignores_legacy_rate() -> None:
+    tariffs = {"waste": _tariff("ВОДООТВЕДЕНИЕ", 5), "fluid": _tariff("ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ", 10), "heating": _tariff("ОТОПЛЕНИЕ", 1000, unit="Гкал")}
+    coordinator = _coordinator({"accounts": {number: {"address": number, "tariffs": tariffs} for number in ("42", "43", "44")}})
+    options = {"water_heating_rate": 0.9, "account_options": {"42": {"water_heating_rate": 0.05}, "43": {"water_heating_rate": 0.02}}}
+    add_entities = MagicMock()
+    asyncio.run(async_setup_entry(None, SimpleNamespace(runtime_data=coordinator, options=options), add_entities))
+    sensors = {sensor._account_id: sensor for sensor in add_entities.call_args.args[0] if isinstance(sensor, ZKHCombinedHotWaterTariffSensor)}
+    assert sensors["42"].native_value == 65
+    assert sensors["43"].native_value == 35
+    assert sensors["44"].native_value is None

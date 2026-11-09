@@ -21,6 +21,7 @@ CONF_RATE_TYPE = "rate_type"
 CONF_HEATING_SYSTEM = "heating_system"
 CONF_BUILDING_FEATURES = "building_features"
 CONF_MANUAL_RATE = "manual_rate"
+CONF_ACCOUNT_OPTIONS = "account_options"
 
 # Session keys
 SESSION_JSESSIONID = "JSESSIONID"
