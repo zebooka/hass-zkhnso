@@ -169,6 +169,35 @@ def test_options_manual_validation_and_restore(monkeypatch):
     assert _suggested(asyncio.run(reopened.async_step_rate_type({"rate_type": "manual"})))["manual_rate"] == "0,06277"
 
 
+@pytest.mark.parametrize("rate", [0.06528, 0.0, 0.123456789])
+@pytest.mark.parametrize("old_manual", [None, "0.09"])
+def test_options_manual_prefills_saved_auto_rate(monkeypatch, rate, old_manual):
+    """The current auto rate takes precedence over any older manual value."""
+    options = {"rate_type": "auto", "water_heating_rate": rate, "other": 42}
+    if old_manual is not None:
+        options["manual_rate"] = old_manual
+    flow = _options_flow(monkeypatch, options)
+    form = asyncio.run(flow.async_step_rate_type({"rate_type": "manual"}))
+    assert form["step_id"] == "rate_manual"
+    assert _suggested(form)["manual_rate"] == str(rate)
+    assert options["rate_type"] == "auto"
+    assert options.get("manual_rate") == old_manual
+
+    invalid = asyncio.run(flow.async_step_rate_manual({"manual_rate": "bad"}))
+    assert invalid["errors"] == {"base": "invalid_rate"}
+    assert _suggested(invalid)["manual_rate"] == "bad"
+    result = asyncio.run(flow.async_step_rate_manual({"manual_rate": str(rate)}))
+    assert result["data"]["rate_type"] == "manual"
+    assert result["data"]["water_heating_rate"] == rate
+    assert result["data"]["other"] == 42
+
+
+def test_options_auto_without_rate_does_not_prefill_manual(monkeypatch):
+    flow = _options_flow(monkeypatch, {"rate_type": "auto", "water_heating_rate": None})
+    form = asyncio.run(flow.async_step_rate_type({"rate_type": "manual"}))
+    assert _suggested(form)["manual_rate"] is None
+
+
 def test_options_auto_confirm_and_restore(monkeypatch):
     """Auto selection is saved only after displaying the calculated coefficient."""
     flow = _options_flow(monkeypatch)

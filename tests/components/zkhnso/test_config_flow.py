@@ -126,6 +126,28 @@ def test_reconfigure_updates_existing_entry_and_reloads(monkeypatch) -> None:
     manager.async_schedule_reload.assert_called_once_with("entry-1")
 
 
+def test_reconfigure_manual_prefills_saved_auto_rate(monkeypatch) -> None:
+    """Reconfiguration suggests the active auto rate rather than an older manual rate."""
+    import custom_components.zkhnso.config_flow as flow_module
+
+    options = {"rate_type": "auto", "water_heating_rate": 0.06528, "manual_rate": "0.04"}
+    flow, entry, manager = _reconfigure_flow(monkeypatch, options=options)
+    monkeypatch.setattr(flow_module, "validate_input", AsyncMock(return_value={
+        "username": "New-User", "account_id": 123, "address": "New address", "title": "Account",
+    }))
+    asyncio.run(flow.async_step_reconfigure({"username": "New-User", "password": "secret"}))
+    form = asyncio.run(flow.async_step_rate_type({"rate_type": "manual"}))
+    assert form["step_id"] == "rate_manual"
+    field = next(key for key in form["data_schema"].schema if key.schema == "manual_rate")
+    assert field.description["suggested_value"] == "0.06528"
+    assert entry.options == options
+    manager.async_update_entry.assert_not_called()
+    result = asyncio.run(flow.async_step_rate_manual({"manual_rate": "0.06528"}))
+    assert result == {"reason": "reconfigure_successful"}
+    assert manager.async_update_entry.call_args.kwargs["options"]["water_heating_rate"] == 0.06528
+    manager.async_schedule_reload.assert_called_once_with("entry-1")
+
+
 @pytest.mark.parametrize("rate_type", ["none", "manual", "auto"])
 def test_reconfigure_collects_and_saves_heating_options(monkeypatch, rate_type) -> None:
     """Reconfigure preserves existing options and saves only after the final step."""

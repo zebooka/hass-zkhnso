@@ -116,6 +116,10 @@ class WaterHeatingFlow:
             if rate_type not in RATE_TYPES:
                 errors["base"] = "invalid_rate_type"
             else:
+                if rate_type == "manual" and options.get(CONF_RATE_TYPE) == "auto":
+                    rate = options.get(CONF_WATER_HEATING_RATE)
+                    if rate is not None:
+                        options[CONF_MANUAL_RATE] = str(rate)
                 options[CONF_RATE_TYPE] = rate_type
                 if rate_type == "none":
                     options[CONF_WATER_HEATING_RATE] = None
