@@ -12,10 +12,11 @@ from homeassistant.components.sensor import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfArea, UnitOfEnergy, UnitOfVolume
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import CONF_ACCOUNT_ID, CONF_WATER_HEATING_RATE
+from .const import CONF_ACCOUNT_ID, CONF_ADDRESS, CONF_WATER_HEATING_RATE, DOMAIN
 from .coordinator import ZKHDataUpdateCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -94,10 +95,26 @@ async def async_setup_entry(
         )
 
 
-class ZKHMeterSensor(CoordinatorEntity, SensorEntity):
-    """Representation of a ZKH meter sensor."""
+class ZKHSensor(CoordinatorEntity, SensorEntity):
+    """Base class for sensors belonging to the same integration entry."""
 
     _attr_has_entity_name = True
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Group sensors of this entry under a single device."""
+        data = self.coordinator.entry.data
+        account_id = data.get(CONF_ACCOUNT_ID)
+        address = data.get(CONF_ADDRESS)
+
+        return DeviceInfo(
+            identifiers={(DOMAIN, self.coordinator.entry.entry_id)},
+            name=f" №{account_id} {address}",
+        )
+
+
+class ZKHMeterSensor(ZKHSensor):
+    """Representation of a ZKH meter sensor."""
 
     def __init__(
         self,
@@ -166,10 +183,8 @@ class ZKHMeterSensor(CoordinatorEntity, SensorEntity):
         }
 
 
-class ZKHTariffSensor(CoordinatorEntity, SensorEntity):
+class ZKHTariffSensor(ZKHSensor):
     """Representation of a ZKH tariff sensor."""
-
-    _attr_has_entity_name = True
 
     def __init__(
         self,
@@ -230,10 +245,8 @@ class ZKHTariffSensor(CoordinatorEntity, SensorEntity):
             return f"RUB/{UnitOfEnergy.GIGA_CALORIE}"
         return f"RUB/{unit}" if unit else "RUB"
 
-class ZKHCombinedTariffSensor(CoordinatorEntity, SensorEntity):
+class ZKHCombinedTariffSensor(ZKHSensor):
     """Representation of a ZKH combined tariff sensor."""
-
-    _attr_has_entity_name = True
 
     def __init__(
         self,

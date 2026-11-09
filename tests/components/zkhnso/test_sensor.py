@@ -24,8 +24,65 @@ def _coordinator(data: dict) -> SimpleNamespace:
     """Create the coordinator shape used by entity unit tests."""
     return SimpleNamespace(
         data=data,
-        entry=SimpleNamespace(entry_id="entry", data={"account_id": 42, "username": "user"}),
+        entry=SimpleNamespace(entry_id="entry", data={"account_id": 42, "address": "Новосибирск, ул. Ленина, 1", "username": "user"}),
     )
+
+
+def test_entry_sensors_share_device_and_keep_unique_ids() -> None:
+    """Meters and all tariff sensors use one device without changing unique IDs."""
+    meter = {"name": "Вода", "unit": "куб.м.", "value": 12.5}
+    tariff = {"name": "Water", "unit": "куб.м.", "rate_per_unit": 10}
+    coordinator = _coordinator({"meters": {"1": meter}, "tariffs": {"water": tariff}})
+    entry = SimpleNamespace(runtime_data=coordinator, options={})
+    add_entities = MagicMock()
+    asyncio.run(async_setup_entry(None, entry, add_entities))
+
+    entities = add_entities.call_args.args[0]
+    assert len(entities) == 4
+    assert {entity.unique_id for entity in entities} == {
+        "entry_meter_1", "entry_tariff_water",
+        "entry_combined_tariff_ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ",
+        "entry_combined_tariff_ГОРЯЧЕЕ ВОДОСНАБЖЕНИЕ",
+    }
+    for entity in entities:
+        assert entity.device_info == {
+            "identifiers": {("zkhnso", "entry")},
+            "name": " №42 Новосибирск, ул. Ленина, 1",
+        }
+        assert entity.has_entity_name is True
+
+
+def test_different_entries_have_separate_devices() -> None:
+    """Separate config entries never share a device, even for the same account."""
+    first = _coordinator({})
+    second = _coordinator({})
+    second.entry.entry_id = "another-entry"
+    first_sensor = ZKHCombinedColdWaterTariffSensor(first)
+    second_sensor = ZKHCombinedColdWaterTariffSensor(second)
+    assert first_sensor.device_info["identifiers"] == {("zkhnso", "entry")}
+    assert second_sensor.device_info["identifiers"] == {("zkhnso", "another-entry")}
+    assert first_sensor.unique_id != second_sensor.unique_id
+
+
+@pytest.mark.parametrize("data,expected", [
+    ({"account_id": 123, "address": "Адрес"}, " №123 Адрес"),
+    ({"account_id": 0, "address": " Адрес "}, " №0  Адрес "),
+])
+def test_device_name_uses_account_details(data, expected) -> None:
+    """The device name includes the account number and address as supplied."""
+    coordinator = _coordinator({})
+    coordinator.entry.data = data
+    sensor = ZKHCombinedColdWaterTariffSensor(coordinator)
+    assert sensor.device_info["name"] == expected
+    assert sensor.device_info["identifiers"] == {("zkhnso", "entry")}
+
+
+def test_device_name_reflects_updated_account_details() -> None:
+    coordinator = _coordinator({})
+    sensor = ZKHCombinedColdWaterTariffSensor(coordinator)
+    coordinator.entry.data = {"account_id": 42, "address": "Новый адрес"}
+    assert sensor.device_info["name"] == " №42 Новый адрес"
+    assert sensor.device_info["identifiers"] == {("zkhnso", "entry")}
 
 
 def test_meter_uses_current_coordinator_data_and_clears_removed_meter() -> None:
