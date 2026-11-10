@@ -16,7 +16,7 @@ class _Client:
     """Successful API client test double."""
 
     current_account_id = "42"
-    accounts = {"42": "Адрес 1", "43": "Адрес 2"}
+    accounts = {"42": "#42", "43": "#43"}
 
     def __init__(self):
         self.switched = []
@@ -36,6 +36,13 @@ class _Client:
 
     async def login(self):
         return True
+
+    async def get_address_info(self):
+        return {
+            "address": f"Адрес {self.current_account_id}",
+            "company_name": f"УК {self.current_account_id}",
+            "company_address": f"Адрес {self.current_account_id}/1"
+        }
 
     async def get_meters(self):
         return {"serial": {"value": int(self.current_account_id)}}
@@ -62,9 +69,9 @@ def test_http_session_fetches_distinct_accounts_and_creates_sensors(monkeypatch)
             assert request.cookies.get("JSESSIONID") == "session"
             return web.Response(text='''<div class="header"><div class="account"><span>42</span>
                 <div class="acc-select"><table class="accounts-grid">
-                <tr><td>ЛС: 42</td><td>Адрес 1</td></tr>
-                <tr><td>ЛС: 43</td><td>Адрес 2</td></tr>
-                </table></div></div><div class="address">Адрес 1</div></div>''')
+                <tr><td><a href="/room/lk/main!change.action?account=42">ЛС: 42</a></td><td>Адрес 1</td></tr>
+                <tr><td><a href="/room/lk/main!change.action?account=43">ЛС: 43</a></td><td>Адрес 2</td></tr>
+                </table></div></div></div>''')
 
         async def switch(request):
             nonlocal current
@@ -72,6 +79,18 @@ def test_http_session_fetches_distinct_accounts_and_creates_sensors(monkeypatch)
             current = request.query["account"]
             requests.append(("switch", current))
             raise web.HTTPFound("main.action")
+
+        async def address_info(request):
+            assert request.cookies.get("JSESSIONID") == "session"
+            requests.append(("address", current))
+            html = ('<div class="header"><div class="address">Address 42</div></div>'
+                    '<div class="main-content"><div class="contacts"><h2><span>Company 42</span>'
+                    '<div class="text"><i>Address:</i>C42</div></div></div>'
+                    if current == "42" else
+                    '<div class="header"><div class="address">Address 43</div></div>'
+                    '<div class="main-content"><div class="contacts"><h2><span>Company 43</span>'
+                    '<div class="text"><i>Address:</i>C43</div></div></div>')
+            return web.Response(text=html)
 
         async def counters(request):
             assert request.cookies.get("JSESSIONID") == "session"
@@ -93,6 +112,7 @@ def test_http_session_fetches_distinct_accounts_and_creates_sensors(monkeypatch)
         app.router.add_get('/room/lk/login.action', login_page)
         app.router.add_post('/room/lk/doLogin!enter.action', login)
         app.router.add_get('/room/lk/main!change.action', switch)
+        app.router.add_get('/room/lk/main.action', address_info)
         app.router.add_get('/room/lk/counters.action', counters)
         app.router.add_get('/room/lk/tariffs.action', tariffs)
         runner = web.AppRunner(app)
@@ -113,7 +133,15 @@ def test_http_session_fetches_distinct_accounts_and_creates_sensors(monkeypatch)
             tariffs_by_account = {(e._account_id, e.key): e.native_value for e in entities if isinstance(e, ZKHTariffSensor)}
             assert meters == {('42', '111'): 10, ('43', '222'): 30}
             assert tariffs_by_account == {('42', 'ВОДА'): 20, ('43', 'ГАЗ'): 40}
-            assert requests == [('meters', '42'), ('tariffs', '42'), ('switch', '43'), ('meters', '43'), ('tariffs', '43')]
+            assert requests == [
+                ('address', '42'),
+                ('meters', '42'),
+                ('tariffs', '42'),
+                ('switch', '43'),
+                ('address', '43'),
+                ('meters', '43'),
+                ('tariffs', '43')
+            ]
         finally:
             await runner.cleanup()
 
@@ -131,8 +159,22 @@ def test_coordinator_returns_meter_and_tariff_containers(monkeypatch) -> None:
 
     assert asyncio.run(coordinator._async_update_data()) == {
         "accounts": {
-            "42": {"account_id": "42", "address": "Адрес 1", "meters": {"serial": {"value": 42}}, "tariffs": {"Water": {"rate_per_unit": 42}}},
-            "43": {"account_id": "43", "address": "Адрес 2", "meters": {"serial": {"value": 43}}, "tariffs": {"Water": {"rate_per_unit": 43}}},
+            "42": {
+                "account_id": "42",
+                "address": "Адрес 42",
+                "company_name": "УК 42",
+                "company_address": "Адрес 42/1",
+                "meters": {"serial": {"value": 42}},
+                "tariffs": {"Water": {"rate_per_unit": 42}}
+            },
+            "43": {
+                "account_id": "43",
+                "address": "Адрес 43",
+                "company_name": "УК 43",
+                "company_address": "Адрес 43/1",
+                "meters": {"serial": {"value": 43}},
+                "tariffs": {"Water": {"rate_per_unit": 43}}
+            },
         },
     }
     assert client.switched == ["43"]

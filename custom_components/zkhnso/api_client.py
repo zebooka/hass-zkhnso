@@ -21,7 +21,7 @@ from .const import (
     SESSION_FORM_TOKEN,
     SESSION_JSESSIONID,
 )
-from .html_parser import extract_table_rows_with_children, html_to_json_simple
+from .html_parser import extract_cells_from_table_rows, extract_cell_text, extract_cell_href, html_to_str, html_to_json
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -77,8 +77,8 @@ class ZKHAPIClient:
                     return None
                 self.jsessionid = jsessionid
 
-                html_content = await response.text()
-                form_token = html_to_json_simple(html_content, "#loginForm input[name=loginToken]", attribute="value")
+                html = await response.text()
+                form_token = html_to_str(html, "#loginForm input[name=loginToken]", attribute="value")
                 if not form_token:
                     _LOGGER.error("FORM_TOKEN not found in HTML response")
                     return None
@@ -122,13 +122,13 @@ class ZKHAPIClient:
         }
 
     @staticmethod
-    def _is_login_page(html_content: str) -> bool:
+    def _is_login_page(html: str) -> bool:
         """Return whether an HTML response contains the login form."""
         return (
-                'id="loginForm"' in html_content
-                or "id='loginForm'" in html_content
-                or 'name="loginToken"' in html_content
-                or "name='loginToken'" in html_content
+                'id="loginForm"' in html
+                or "id='loginForm'" in html
+                or 'name="loginToken"' in html
+                or "name='loginToken'" in html
         )
 
     @staticmethod
@@ -183,38 +183,30 @@ class ZKHAPIClient:
                     raise ZKHAPIConnectionError(
                         f"Login request failed with HTTP status {response.status}"
                     )
-                response_text = await response.text()
-                self._log_page_diagnostics("Login", response, response_text)
+                html = await response.text()
+                self._log_page_diagnostics("Login", response, html)
 
                 updated_jsessionid = self._extract_jsessionid(response.headers)
                 if updated_jsessionid:
                     self.jsessionid = updated_jsessionid
                     _LOGGER.debug("JSESSIONID updated after login")
 
-                if not self._is_login_page(response_text):
-                    self.accounts = {}
-                    current_account_id = html_to_json_simple(response_text, ".header .account span")
-                    current_address = html_to_json_simple(response_text, ".header .address")
-                    if not isinstance(current_account_id, str) or not isinstance(current_address, str):
+                if not self._is_login_page(html):
+
+                    self.current_account_id = html_to_str(html, ".header .account span")
+                    if self.current_account_id is None:
                         raise ZKHAPIConnectionError("Login page has no current account information")
 
-                    current_account_id = " ".join(current_account_id.split()) or None
-                    current_address = " ".join(current_address.split()) or None
-                    if current_account_id is None or current_address is None:
-                        raise ZKHAPIConnectionError("Login page has incomplete account information")
-                    self.current_account_id = current_account_id
-                    self.accounts[current_account_id] = current_address
+                    self.accounts = {self.current_account_id: None}
 
-                    rows = extract_table_rows_with_children(
-                        response_text, ".header .account .acc-select .accounts-grid tr"
-                    ) or []
+                    rows = extract_cells_from_table_rows(html, ".header .account .acc-select .accounts-grid tr") or []
                     for row in rows:
                         if len(row) < 2:
                             continue
-                        account_id = row[0].strip().removeprefix("ЛС:").strip() or None
-                        address = " ".join(row[1].split()) or None
-                        if account_id is not None and address is not None and account_id != self.current_account_id:
-                            self.accounts[account_id] = address
+                        account_id = extract_cell_text(row[0]).removeprefix("ЛС:").strip() or None
+                        change_url = extract_cell_href(row[0])
+                        if account_id is not None:
+                            self.accounts[account_id] = change_url
 
                     _LOGGER.debug("Login response accepted")
                     return True
@@ -222,7 +214,7 @@ class ZKHAPIClient:
                 _LOGGER.warning(
                     "Login was not accepted: status=%d, login_form=%s",
                     response.status,
-                    self._is_login_page(response_text),
+                    self._is_login_page(html),
                 )
                 return False
 
@@ -235,7 +227,9 @@ class ZKHAPIClient:
         """Switch the session to another account, verifying the expected redirect."""
         if not self.jsessionid:
             raise ZKHAPIConnectionError("Must be logged in to change account")
-        url = urljoin(API_BASE_URL, API_URL_CHANGE_ACCOUNT_ID % quote(str(account_id), safe=""))
+        if not self.accounts[account_id]:
+            raise ZKHAPIConnectionError("Account has no change url")
+        url = urljoin(API_BASE_URL, self.accounts[account_id])
         try:
             async with self._session.get(
                 url, allow_redirects=False,
@@ -250,20 +244,8 @@ class ZKHAPIClient:
         except Exception as err:
             raise ZKHAPIConnectionError("Failed to switch ZKHNSO account") from err
 
-    async def get_meters(self) -> dict[str, Any] | None:
-        """Fetch meters/counters data."""
-        url = urljoin(API_BASE_URL, API_URL_METERS)
-        rows = await self.get_data(url, "#countersForm table tr", "Meters")
-        return self._process_meters_data(rows) if rows is not None else None
-
-    async def get_tariffs(self) -> dict[str, Any] | None:
-        """Fetch tariffs data."""
-        url = urljoin(API_BASE_URL, API_URL_TARIFFS)
-        rows = await self.get_data(url, "#tariffsForm table tr", "Tariffs")
-        return self._process_tariffs_data(rows) if rows is not None else None
-
-    async def get_data(self, url: str, selector: str, page_name: str) -> list[list[str]] | None:
-        """Fetch an authenticated page and extract rows from its table."""
+    async def _get_page(self, url: str, page_name: str) -> str | None:
+        """Fetch an authenticated page."""
         if not self.jsessionid:
             _LOGGER.error("Must be logged in to fetch %s", page_name.casefold())
             return None
@@ -289,18 +271,50 @@ class ZKHAPIClient:
                     _LOGGER.warning("%s response returned the login page", page_name)
                     return None
 
-                rows = extract_table_rows_with_children(html_content, selector)
-                if not rows:
-                    _LOGGER.warning("No %s table rows found at %s", page_name.casefold(), url)
-                    return []
-
-                return rows
+                return html_content
         except aiohttp.ClientError as err:
             _LOGGER.error("Error during %s request: %s", page_name.casefold(), err)
             return None
         except Exception as err:
             _LOGGER.exception("Unexpected error during %s fetch: %s", page_name.casefold(), err)
             return None
+
+    async def get_address_info(self) -> dict[str, Any] | None:
+        url = urljoin(API_BASE_URL, API_URL_MAIN)
+        html = await self._get_page(url, "Address info")
+        if not html:
+            return None
+
+        return {
+            "address": html_to_str(html, ".header .address"),
+            "company_name": html_to_str(html, ".main-content .contacts h2"),
+            "company_address": html_to_str(html, ".main-content .contacts div.text"),
+        }
+
+    async def _get_data(self, url: str, selector: str, page_name: str) -> list[list[str]] | None:
+        """Fetch an authenticated page and extract rows from its table."""
+        html = await self._get_page(url, page_name)
+        if not html:
+            return None
+
+        rows = extract_cells_from_table_rows(html, selector)
+        if not rows:
+            _LOGGER.warning("No %s table rows found at %s", page_name.casefold(), url)
+            return []
+
+        return [[extract_cell_text(cell) for cell in row] for row in rows]
+
+    async def get_meters(self) -> dict[str, Any] | None:
+        """Fetch meters/counters data."""
+        url = urljoin(API_BASE_URL, API_URL_METERS)
+        rows = await self._get_data(url, "#countersForm table tr", "Meters")
+        return self._process_meters_data(rows) if rows is not None else None
+
+    async def get_tariffs(self) -> dict[str, Any] | None:
+        """Fetch tariffs data."""
+        url = urljoin(API_BASE_URL, API_URL_TARIFFS)
+        rows = await self._get_data(url, "#tariffsForm table tr", "Tariffs")
+        return self._process_tariffs_data(rows) if rows is not None else None
 
     def _parse_float(self, value_str: str) -> float | None:
         """Extract and parse float value from string."""

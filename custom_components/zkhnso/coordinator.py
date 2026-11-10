@@ -46,19 +46,27 @@ class ZKHDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 raise UpdateFailed("Failed to identify current ZKHNSO account")
 
             accounts = {}
-            for account_id, address in client.accounts.items():
+            for account_id in client.accounts:
                 if account_id != client.current_account_id:
                     try:
                         await client.change_account(account_id)
                     except ZKHAPIConnectionError as err:
                         raise UpdateFailed("Failed to switch ZKHNSO account") from err
 
+                address_info = await client.get_address_info()
+                if address_info is None:
+                    raise UpdateFailed("Failed to fetch ZKHNSO address info data")
                 meters = await client.get_meters()
                 if meters is None:
                     raise UpdateFailed("Failed to fetch ZKHNSO meters data")
                 tariffs = await client.get_tariffs()
                 if tariffs is None:
                     raise UpdateFailed("Failed to fetch ZKHNSO tariffs data")
-                accounts[account_id] = {"account_id": account_id, "address": address, "meters": meters, "tariffs": tariffs}
+                accounts[account_id] = {
+                    **address_info,
+                    "account_id": account_id,
+                    "meters": meters,
+                    "tariffs": tariffs,
+                }
 
         return {"accounts": accounts}
