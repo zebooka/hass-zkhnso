@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import aiohttp
+from aiohttp import web
 from multidict import CIMultiDict
 import pytest
 
@@ -24,14 +25,16 @@ def _login_client(status=200, body='<div class="header"><div class="account"><sp
     request = MagicMock()
     request.__aenter__ = AsyncMock(return_value=response)
     request.__aexit__ = AsyncMock(return_value=None)
-    client.session = SimpleNamespace(post=MagicMock(return_value=request))
+    client.session = SimpleNamespace(post=MagicMock(return_value=request), cookie_jar=MagicMock())
     return client
 
 
 def test_login_distinguishes_accepted_and_rejected_credentials() -> None:
     """Only the returned login form represents rejected credentials."""
     assert asyncio.run(_login_client().login()) is True
-    assert asyncio.run(_login_client(body='<form id="loginForm"></form>').login()) is False
+    rejected = _login_client(body='<form id="loginForm"></form>')
+    assert asyncio.run(rejected.login()) is False
+    rejected.session.cookie_jar.update_cookies.assert_not_called()
 
 
 def test_login_initializes_current_account_for_configuration() -> None:
@@ -226,15 +229,78 @@ def test_process_meters_supports_both_counter_row_formats() -> None:
     assert result["22_157073"]["next_verification_date"] == "2028-06-02"
 
 
-def test_authenticated_cookies_exclude_session_cookie() -> None:
-    """The cookie jar, rather than manual headers, manages JSESSIONID."""
-    client = ZKHAPIClient("user", "password")
-    client.jsessionid = "session-id"
+def test_session_cookie_jar_handles_login_rotation_and_client_isolation(monkeypatch) -> None:
+    """Real HTTP requests use isolated jars and respect server cookie updates."""
+    import custom_components.zkhnso.api_client as api_client
+    from yarl import URL
 
-    assert client._get_authenticated_cookies() == {
-        "userLogin": "user",
-        "loginModule": "lk",
-    }
+    async def run():
+        received = []
+
+        async def preflight(request):
+            response = web.Response(text='<form id="loginForm"><input name="loginToken" value="token"></form>')
+            response.set_cookie("JSESSIONID", "preflight", path="/")
+            return response
+
+        async def login(request):
+            form = await request.post()
+            received.append(("login", form["userName"], dict(request.cookies)))
+            response = web.Response(text='''<div class="header"><div class="account"><span>42</span>
+                <div class="acc-select"><table class="accounts-grid"><tr>
+                <td><a href="/room/lk/main!change.action?account=43">ЛС: 43</a></td><td>Адрес</td>
+                </tr></table></div></div></div>''')
+            response.set_cookie("JSESSIONID", f"login-{form['userName']}", path="/")
+            return response
+
+        async def address(request):
+            received.append(("address", None, dict(request.cookies)))
+            response = web.Response(text='<div class="header"><div class="address">Адрес</div></div>')
+            response.set_cookie("JSESSIONID", f"rotated-{request.cookies['userLogin']}", path="/")
+            return response
+
+        async def switch(request):
+            received.append(("switch", None, dict(request.cookies)))
+            raise web.HTTPFound("main.action")
+
+        app = web.Application()
+        app.router.add_get("/room/lk/login.action", preflight)
+        app.router.add_post("/room/lk/doLogin!enter.action", login)
+        app.router.add_get("/room/lk/main.action", address)
+        app.router.add_get("/room/lk/main!change.action", switch)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, "127.0.0.1", 0)
+        await site.start()
+        try:
+            port = site._server.sockets[0].getsockname()[1]
+            base_url = f"http://localhost:{port}/room/lk/"
+            monkeypatch.setattr(api_client, "API_BASE_URL", base_url)
+            async with ZKHAPIClient("first", "password") as first, ZKHAPIClient("second", "password") as second:
+                for client in (first, second):
+                    assert await client.preflight()
+                    assert await client.login()
+                for client in (first, second):
+                    assert (await client.get_address_info())["address"] == "Адрес"
+                    await client.change_account("43")
+                    other_path_cookies = client.session.cookie_jar.filter_cookies(URL(f"http://localhost:{port}/other"))
+                    assert "userLogin" not in other_path_cookies
+                    assert "loginModule" not in other_path_cookies
+                    assert not client.session.cookie_jar.filter_cookies(URL(f"http://other.example:{port}/room/lk/"))
+
+            assert received == [
+                ("login", "first", {"JSESSIONID": "preflight"}),
+                ("login", "second", {"JSESSIONID": "preflight"}),
+                ("address", None, {"JSESSIONID": "login-first", "userLogin": "first", "loginModule": "lk"}),
+                ("switch", None, {"JSESSIONID": "rotated-first", "userLogin": "first", "loginModule": "lk"}),
+                ("address", None, {"JSESSIONID": "login-second", "userLogin": "second", "loginModule": "lk"}),
+                ("switch", None, {"JSESSIONID": "rotated-second", "userLogin": "second", "loginModule": "lk"}),
+            ]
+            assert first.session is None
+            assert second.session is None
+        finally:
+            await runner.cleanup()
+
+    asyncio.run(run())
 
 
 def test_process_tariffs_numbers_duplicate_names() -> None:

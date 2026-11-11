@@ -9,6 +9,7 @@ from typing import Any
 from urllib.parse import quote, urlencode, urljoin, urlsplit
 
 import aiohttp
+from yarl import URL
 
 from .const import (
     API_BASE_URL,
@@ -110,17 +111,6 @@ class ZKHAPIClient:
                         return part.split("=", 1)[1]
         return None
 
-    def _get_authenticated_cookies(self) -> dict[str, str]:
-        """Return application cookies for authenticated requests.
-
-        Server-issued session cookies, including JSESSIONID, are managed by the
-        isolated aiohttp CookieJar and must not be replaced manually.
-        """
-        return {
-            "userLogin": self.username,
-            "loginModule": "lk",
-        }
-
     @staticmethod
     def _is_login_page(html: str) -> bool:
         """Return whether an HTML response contains the login form."""
@@ -198,6 +188,10 @@ class ZKHAPIClient:
                         if account_id is not None:
                             self.accounts[account_id] = change_url
 
+                    self._session.cookie_jar.update_cookies(
+                        {"userLogin": self.username, "loginModule": "lk"},
+                        response_url=URL(API_BASE_URL),
+                    )
                     _LOGGER.debug("Login response accepted")
                     return True
 
@@ -224,7 +218,6 @@ class ZKHAPIClient:
             async with self._session.get(
                 url, allow_redirects=False,
                 headers={"Referer": urljoin(API_BASE_URL, API_URL_MAIN)},
-                cookies=self._get_authenticated_cookies(),
             ) as response:
                 if response.status >= 400:
                     raise ZKHAPIConnectionError(f"Account switch returned an unexpected response {response.status}")
@@ -244,7 +237,6 @@ class ZKHAPIClient:
             async with self._session.get(
                 url,
                 headers={"Referer": urljoin(API_BASE_URL, API_URL_MAIN)},
-                cookies=self._get_authenticated_cookies(),
             ) as response:
                 if response.status != 200:
                     _LOGGER.error(
