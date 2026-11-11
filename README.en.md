@@ -167,7 +167,7 @@ system. It is established by legislation of Novosibirsk Oblast and, at the time 
 
 - The integration works only with ZKHNSO personal accounts in Novosibirsk Oblast.
 - If the ZKHNSO website is unavailable, Home Assistant retries the connection automatically.
-- New meters and tariffs are added automatically.
+- New meters, tariffs and accounts/addresses are added automatically.
 - To remove the integration, open its page under **Settings → Devices & services** and select **Delete**.
 
 ## Support
