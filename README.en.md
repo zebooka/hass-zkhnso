@@ -56,11 +56,11 @@ Settings from previous versions are incompatible with the new version: remove th
 - Retrieves active meters, including serial number, meter type, next verification date, current reading, and the date of the most recent reading submission.
 - Retrieves tariffs and usage norms.
 
-Data is updated once per hour. The integration creates a separate device with meter and tariff sensors for each utility account associated with the login. New addresses and sensors are discovered during updates. Configure the water heating rate separately for each address by selecting its utility account in the integration options. The former shared rate must be configured again.
+Data is updated once per hour. The integration creates a separate device with meter and tariff sensors for each utility account. Select the account and tariffs in the integration options; if using a heat-transfer fluid tariff, also configure the heating tariff and rate.
 
 ## Calculating meter costs
 
-To calculate water costs in the **Energy** dashboard, you need combined hot- and cold-water tariffs. There are two ways to create them: the integration can attempt to create combined tariff sensors automatically using the available wastewater, cold-water, and hot-water tariffs, or you can create tariff sensors manually using templates.
+To calculate water costs in the **Energy** dashboard, configure combined tariffs in the integration options or create tariff sensors manually using templates.
 
 ### Automatic combined tariffs
 
@@ -76,7 +76,7 @@ Automatic combined tariffs require several conditions. First, the management com
 
 Second, if heating tariffs are used to calculate the combined hot-water tariff, the **water heating rate** must be set in the integration settings. It can be entered manually or calculated automatically based on the [building features and hot-water system type](#thermal-energy-consumption-standard-for-heating-cold-water-in-novosibirsk-oblast).
 
-Currently, tariffs are selected automatically in priority order.
+Select tariffs for each account in the integration options. The previous automatic selection is no longer used, so tariffs must be selected again. An empty selection or an unavailable selected tariff makes the corresponding combined tariff unknown.
 
 ### Combined tariffs using template sensors
 

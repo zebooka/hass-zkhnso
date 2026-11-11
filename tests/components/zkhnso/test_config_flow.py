@@ -100,7 +100,7 @@ def test_reconfigure_form_does_not_expose_password(monkeypatch) -> None:
 def test_reconfigure_updates_credentials_and_preserves_options(monkeypatch) -> None:
     import custom_components.zkhnso.config_flow as flow_module
 
-    options = {"account_options": {"123": {"water_heating_rate": 0.05, "extra": 1}}, "other": 5}
+    options = {"account_options": {"123": {"water_heating_rate": 0.05, "waste_water_tariff": "ВОДООТВЕДЕНИЕ", "extra": 1}}, "other": 5}
     flow, entry, manager = _reconfigure_flow(monkeypatch, options=options)
     monkeypatch.setattr(flow_module, "validate_input", AsyncMock(return_value={"username": "New-User", "title": "New-User"}))
     result = asyncio.run(flow.async_step_reconfigure({"username": "New-User", "password": "new-secret"}))
@@ -109,7 +109,7 @@ def test_reconfigure_updates_credentials_and_preserves_options(monkeypatch) -> N
     assert kwargs["unique_id"] == "new-user"
     assert kwargs["title"] == "New-User"
     assert kwargs["data"] == {"username": "New-User", "password": "new-secret"}
-    assert kwargs["options"] == {"account_options": {"123": {"water_heating_rate": 0.05}}}
+    assert kwargs["options"] == {"account_options": {"123": {"water_heating_rate": 0.05, "waste_water_tariff": "ВОДООТВЕДЕНИЕ"}}}
     assert entry.options == options
     manager.async_schedule_reload.assert_called_once_with("entry-1")
 
@@ -118,7 +118,7 @@ def test_reauth_updates_credentials_and_keeps_only_account_options(monkeypatch) 
     import custom_components.zkhnso.config_flow as flow_module
 
     entry = SimpleNamespace(entry_id="entry", data={"username": "old", "account_id": 123},
-        options={"other": 1, "account_options": {"123": {"water_heating_rate": 0.05, "extra": 1}}})
+        options={"other": 1, "account_options": {"123": {"water_heating_rate": 0.05, "hot_water_tariff": "ГОРЯЧЕЕ ВОДОСНАБЖЕНИЕ", "extra": 1}}})
     manager = SimpleNamespace(async_update_entry=MagicMock(), async_reload=AsyncMock())
     flow = ConfigFlow()
     flow.hass = SimpleNamespace(config_entries=manager)
@@ -128,7 +128,7 @@ def test_reauth_updates_credentials_and_keeps_only_account_options(monkeypatch) 
     result = asyncio.run(flow.async_step_reauth_confirm({"username": "user", "password": "pass"}))
     assert result == {"reason": "reauth_successful"}
     assert manager.async_update_entry.call_args.kwargs["data"] == {"username": "user", "password": "pass"}
-    assert manager.async_update_entry.call_args.kwargs["options"] == {"account_options": {"123": {"water_heating_rate": 0.05}}}
+    assert manager.async_update_entry.call_args.kwargs["options"] == {"account_options": {"123": {"water_heating_rate": 0.05, "hot_water_tariff": "ГОРЯЧЕЕ ВОДОСНАБЖЕНИЕ"}}}
     manager.async_reload.assert_awaited_once_with("entry")
 
 

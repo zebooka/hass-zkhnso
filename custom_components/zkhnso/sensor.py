@@ -12,7 +12,11 @@ from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo, a
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import CONF_ACCOUNT_OPTIONS, CONF_WATER_HEATING_RATE, DOMAIN
+from .const import (
+    CONF_ACCOUNT_OPTIONS, CONF_COLD_WATER_TARIFF, CONF_HOT_WATER_TARIFF,
+    CONF_HOT_WATER_HEATING_TARIFF, CONF_WASTE_WATER_TARIFF, CONF_WATER_HEATING_RATE,
+    DOMAIN, HOT_WATER_TARIFFS, HOT_WATER_FLUID_TARIFFS,
+)
 from .coordinator import ZKHDataUpdateCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -21,12 +25,6 @@ SQUARE_UNITS = {"кв.м.", "кв.м", "м²", "m²"}
 VOLUME_UNITS = {"куб.м.", "куб.м", "м³", "m³"}
 ELECTRIC_UNITS = {"кВтч", "кВт·ч", "кВт⋅ч", "kWh"}
 HEAT_UNITS = {"Гкал", "Gcal"}
-
-WASTE_WATER_TARIFFS = ["ВОДООТВЕДЕНИЕ", "ОТВЕД. СТОЧ. ВОД СОИ"]
-COLD_WATER_TARIFFS = ["ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ", "ХВ НА СОД-Е ОБЩ.ИМУЩ."]
-HOT_WATER_TARIFFS = ["ГОРЯЧЕЕ ВОДОСНАБЖЕНИЕ", "ГВ НА СОД-Е ОБЩ.ИМУЩ."]
-HOT_WATER_HEATING_TARIFFS = ["ГОРЯЧЕЕ ВОДОСНАБЖЕНИЕ (ПОДОГРЕВ)", "ГВ НА СОИ (ПОДОГРЕВ)", "ОТОПЛЕНИЕ"]
-HOT_WATER_FLUID_TARIFFS = ["ГОРЯЧЕЕ ВОДОСНАБЖЕНИЕ (ТЕПЛОНОСИТ)", "ГВ НА СОИ (ТЕПЛОНОСИТ)", "ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ", "ХВ НА СОД-Е ОБЩ.ИМУЩ."]
 
 PARALLEL_UPDATES = 0
 
@@ -268,8 +266,16 @@ class ZKHCombinedTariffSensor(ZKHSensor):
         self._attr_icon = "mdi:sigma"
 
     @property
+    def _tariff_options(self) -> dict[str, Any]:
+        return self.coordinator.entry.options.get(CONF_ACCOUNT_OPTIONS, {}).get(self._account_id, {})
+
+    def _selected_tariff(self, key: str, units: set[str]) -> dict[str, Any] | None:
+        name = self._tariff_options.get(key)
+        return self._get_first_available_tariff([name], units) if name else None
+
+    @property
     def _waste_water(self) -> dict[str, Any] | None:
-        return self._get_first_available_tariff(WASTE_WATER_TARIFFS, VOLUME_UNITS)
+        return self._selected_tariff(CONF_WASTE_WATER_TARIFF, VOLUME_UNITS)
 
     def _get_first_available_tariff(self, names: list[str], units: set[str]) -> dict[str, Any] | None:
         tariffs = self._account.get("tariffs") if isinstance(self._account, dict) else None
@@ -298,7 +304,7 @@ class ZKHCombinedColdWaterTariffSensor(ZKHCombinedTariffSensor):
 
     @property
     def _cold_water(self) -> dict[str, Any] | None:
-        return self._get_first_available_tariff(COLD_WATER_TARIFFS, VOLUME_UNITS)
+        return self._selected_tariff(CONF_COLD_WATER_TARIFF, VOLUME_UNITS)
 
     @property
     def native_value(self) -> float | None:
@@ -335,15 +341,19 @@ class ZKHCombinedHotWaterTariffSensor(ZKHCombinedTariffSensor):
 
     @property
     def _hot_water(self) -> dict[str, Any] | None:
-        return self._get_first_available_tariff(HOT_WATER_TARIFFS, VOLUME_UNITS)
+        if self._tariff_options.get(CONF_HOT_WATER_TARIFF) not in HOT_WATER_TARIFFS:
+            return None
+        return self._selected_tariff(CONF_HOT_WATER_TARIFF, VOLUME_UNITS)
 
     @property
     def _hot_water_heating(self) -> dict[str, Any] | None:
-        return self._get_first_available_tariff(HOT_WATER_HEATING_TARIFFS, HEAT_UNITS)
+        return self._selected_tariff(CONF_HOT_WATER_HEATING_TARIFF, HEAT_UNITS)
 
     @property
     def _hot_water_fluid(self) -> dict[str, Any] | None:
-        return self._get_first_available_tariff(HOT_WATER_FLUID_TARIFFS, VOLUME_UNITS)
+        if self._tariff_options.get(CONF_HOT_WATER_TARIFF) not in HOT_WATER_FLUID_TARIFFS:
+            return None
+        return self._selected_tariff(CONF_HOT_WATER_TARIFF, VOLUME_UNITS)
 
     @property
     def native_value(self) -> float | None:

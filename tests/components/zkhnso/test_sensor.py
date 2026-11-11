@@ -6,6 +6,10 @@ from unittest.mock import MagicMock
 from homeassistant.components.sensor import SensorDeviceClass
 from homeassistant.const import UnitOfEnergy, UnitOfVolume
 from homeassistant.helpers.device_registry import DeviceEntryType
+from custom_components.zkhnso.const import (
+    WASTE_WATER_TARIFFS, COLD_WATER_TARIFFS, HOT_WATER_TARIFFS,
+    HOT_WATER_HEATING_TARIFFS, HOT_WATER_FLUID_TARIFFS,
+)
 
 import pytest
 
@@ -26,9 +30,21 @@ def _coordinator(data: dict) -> SimpleNamespace:
     """Create the coordinator shape used by entity unit tests."""
     if data is not None and "accounts" not in data:
         data = {"accounts": {"42": {"address": "Новосибирск, ул. Ленина, 1", **data}}}
+    accounts = (data or {}).get("accounts", {})
+    def selected(account):
+        tariffs = account.get("tariffs") or {}
+        names = {tariff.get("name") for tariff in tariffs.values() if isinstance(tariff, dict)} if isinstance(tariffs, dict) else set()
+        def choose(candidates):
+            return next((name for name in candidates if name in names), candidates[0])
+        return {
+            "waste_water_tariff": choose(WASTE_WATER_TARIFFS),
+            "cold_water_tariff": choose(COLD_WATER_TARIFFS),
+            "hot_water_tariff": choose(HOT_WATER_TARIFFS + HOT_WATER_FLUID_TARIFFS),
+            "hot_water_heating_tariff": choose(HOT_WATER_HEATING_TARIFFS),
+        }
     return SimpleNamespace(
         data=data,
-        entry=SimpleNamespace(entry_id="entry", data={"username": "user"}),
+        entry=SimpleNamespace(entry_id="entry", data={"username": "user"}, options={"account_options": {account_id: selected(account) for account_id, account in accounts.items()}}),
     )
 
 
@@ -150,6 +166,53 @@ def test_combined_tariffs_use_only_their_own_account() -> None:
     assert second.native_value == 50
     del coordinator.data["accounts"]["43"]
     assert second.native_value is None
+
+
+@pytest.mark.parametrize("missing", ["waste_water_tariff", "cold_water_tariff", "hot_water_tariff", "hot_water_heating_tariff"])
+def test_combined_tariffs_require_explicit_components(missing) -> None:
+    coordinator = _coordinator({"tariffs": {
+        "w": _tariff("ВОДООТВЕДЕНИЕ", 5),
+        "c": _tariff("ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ", 10),
+        "h": _tariff("ОТОПЛЕНИЕ", 1000, unit="Гкал"),
+    }})
+    coordinator.entry.options["account_options"]["42"][missing] = ""
+    cold = ZKHCombinedColdWaterTariffSensor(coordinator, "42")
+    hot = ZKHCombinedHotWaterTariffSensor(coordinator, 0.05, "42")
+    assert cold.native_value == (None if missing in ("waste_water_tariff", "cold_water_tariff") else 15)
+    assert hot.native_value == (None if missing != "cold_water_tariff" else 65)
+
+
+def test_no_tariff_settings_disable_automatic_calculation() -> None:
+    coordinator = _coordinator({"tariffs": {
+        "w": _tariff("ВОДООТВЕДЕНИЕ", 5), "c": _tariff("ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ", 10),
+        "h": _tariff("ГОРЯЧЕЕ ВОДОСНАБЖЕНИЕ", 50),
+    }})
+    coordinator.entry.options = {"account_options": {"42": {"water_heating_rate": 0.05}}}
+    for sensor in (ZKHCombinedColdWaterTariffSensor(coordinator, "42"), ZKHCombinedHotWaterTariffSensor(coordinator, 0.05, "42")):
+        assert sensor.native_value is None
+        assert sensor.extra_state_attributes == {}
+
+
+def test_selected_tariffs_override_other_available_choices() -> None:
+    tariffs = {
+        "w1": _tariff("ВОДООТВЕДЕНИЕ", 5),
+        "w2": _tariff("ОТВЕД. СТОЧ. ВОД СОИ", 6),
+        "c1": _tariff("ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ", 10),
+        "c2": _tariff("ХВ НА СОД-Е ОБЩ.ИМУЩ.", 11),
+        "direct": _tariff("ГОРЯЧЕЕ ВОДОСНАБЖЕНИЕ", 50),
+        "heat": _tariff("ОТОПЛЕНИЕ", 1000, unit="Гкал"),
+    }
+    coordinator = _coordinator({"tariffs": tariffs})
+    options = coordinator.entry.options["account_options"]["42"]
+    options.update({"waste_water_tariff": "ОТВЕД. СТОЧ. ВОД СОИ", "cold_water_tariff": "ХВ НА СОД-Е ОБЩ.ИМУЩ.",
+                    "hot_water_tariff": "ХВ НА СОД-Е ОБЩ.ИМУЩ.", "hot_water_heating_tariff": "ОТОПЛЕНИЕ"})
+    cold = ZKHCombinedColdWaterTariffSensor(coordinator, "42")
+    hot = ZKHCombinedHotWaterTariffSensor(coordinator, 0.05, "42")
+    assert cold.native_value == 17
+    assert hot.native_value == 67
+    del tariffs["c2"]
+    assert cold.native_value is None
+    assert hot.native_value is None
 
 
 def test_leading_zeroes_preserved_in_account_ids() -> None:
@@ -374,8 +437,8 @@ def test_combined_cold_water_priority_and_coordinator_updates() -> None:
     assert sensor.extra_state_attributes["names"] == ["ВОДООТВЕДЕНИЕ", "ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ"]
     coordinator.data["accounts"]["42"]["tariffs"]["waste_primary"]["rate_per_unit"] = None
     coordinator.data["accounts"]["42"]["tariffs"]["cold_primary"]["rate_per_unit"] = None
-    assert sensor.native_value == 17
-    assert sensor.extra_state_attributes["names"] == ["ОТВЕД. СТОЧ. ВОД СОИ", "ХВ НА СОД-Е ОБЩ.ИМУЩ."]
+    assert sensor.native_value is None
+    assert sensor.extra_state_attributes == {}
     coordinator.data["accounts"]["42"]["tariffs"] = {}
     assert sensor.native_value is None
     assert sensor.extra_state_attributes == {}
@@ -524,8 +587,8 @@ def test_combined_hot_water_priority_and_coordinator_updates() -> None:
     ]
     coordinator.data["accounts"]["42"]["tariffs"]["fluid_primary"]["rate_per_unit"] = None
     coordinator.data["accounts"]["42"]["tariffs"]["heat_primary"]["rate_per_unit"] = None
-    assert sensor.native_value == 115
-    assert sensor.extra_state_attributes["names"] == ["ВОДООТВЕДЕНИЕ", "ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ", "ОТОПЛЕНИЕ"]
+    assert sensor.native_value is None
+    assert sensor.extra_state_attributes == {}
     coordinator.data["accounts"]["42"]["tariffs"] = {}
     assert sensor.native_value is None
     assert sensor.extra_state_attributes == {}
@@ -537,7 +600,8 @@ def test_setup_passes_heating_rate_to_combined_hot_water_sensor(device_registry)
         "fluid": _tariff("ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ", 10),
         "heating": _tariff("ОТОПЛЕНИЕ", 1000, unit="Гкал"),
     }})
-    entry = SimpleNamespace(entry_id="entry", runtime_data=coordinator, options={"account_options": {"42": {"water_heating_rate": 0.05}}})
+    coordinator.entry.options["account_options"]["42"]["water_heating_rate"] = 0.05
+    entry = SimpleNamespace(entry_id="entry", runtime_data=coordinator, options=coordinator.entry.options)
     add_entities = MagicMock()
     asyncio.run(async_setup_entry(None, entry, add_entities))
     entities = add_entities.call_args.args[0]
@@ -548,7 +612,10 @@ def test_setup_passes_heating_rate_to_combined_hot_water_sensor(device_registry)
 def test_heating_rate_is_independent_per_account_and_ignores_legacy_rate(device_registry) -> None:
     tariffs = {"waste": _tariff("ВОДООТВЕДЕНИЕ", 5), "fluid": _tariff("ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ", 10), "heating": _tariff("ОТОПЛЕНИЕ", 1000, unit="Гкал")}
     coordinator = _coordinator({"accounts": {number: {"address": number, "tariffs": tariffs} for number in ("42", "43", "44")}})
-    options = {"water_heating_rate": 0.9, "account_options": {"42": {"water_heating_rate": 0.05}, "43": {"water_heating_rate": 0.02}}}
+    options = {"water_heating_rate": 0.9, "account_options": coordinator.entry.options["account_options"]}
+    options["account_options"]["42"]["water_heating_rate"] = 0.05
+    options["account_options"]["43"]["water_heating_rate"] = 0.02
+    coordinator.entry.options = options
     add_entities = MagicMock()
     asyncio.run(async_setup_entry(None, SimpleNamespace(entry_id="entry", runtime_data=coordinator, options=options), add_entities))
     sensors = {sensor._account_id: sensor for sensor in add_entities.call_args.args[0] if isinstance(sensor, ZKHCombinedHotWaterTariffSensor)}

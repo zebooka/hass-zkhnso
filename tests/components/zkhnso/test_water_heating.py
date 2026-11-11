@@ -49,13 +49,15 @@ def test_options_select_account_and_keep_rates_separate(monkeypatch):
     old = {"water_heating_rate": 0.1, "rate_type": "auto", "other": 5,
            "account_options": {"43": {"rate_type": "manual", "water_heating_rate": 0.08, "other": 5}}}
     flow._config_entry = SimpleNamespace(options=old, runtime_data=SimpleNamespace(data={"accounts": {
-        "42": {"address": "Первый"}, "43": {"address": "Второй"},
+        "42": {"address": "Первый", "tariffs": {"cold": {"name": "ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ"}}}, "43": {"address": "Второй"},
     }}))
     monkeypatch.setattr(flow, "async_show_form", lambda **kwargs: kwargs)
     monkeypatch.setattr(flow, "async_create_entry", lambda **kwargs: kwargs)
     assert asyncio.run(flow.async_step_init())["step_id"] == "init"
     assert asyncio.run(flow.async_step_init({"account_id": "missing"}))["errors"] == {"base": "invalid_account"}
     form = asyncio.run(flow.async_step_init({"account_id": "42"}))
+    assert form["step_id"] == "tariffs"
+    form = asyncio.run(flow.async_step_tariffs({"hot_water_tariff": "ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ"}))
     assert form["step_id"] == "rate_type_unset"
     asyncio.run(flow.async_step_rate_type({"rate_type": "manual"}))
     result = asyncio.run(flow.async_step_rate_manual({"manual_rate": "0.04"}))
@@ -71,6 +73,69 @@ def test_options_without_accounts_aborts(monkeypatch):
     flow._config_entry = SimpleNamespace(options={}, runtime_data=SimpleNamespace(data={"accounts": {}}))
     monkeypatch.setattr(flow, "async_abort", lambda **kwargs: kwargs)
     assert asyncio.run(flow.async_step_init()) == {"reason": "no_accounts"}
+
+
+def test_tariff_forms_filter_restore_and_validate_account_choices(monkeypatch):
+    names = ["ВОДООТВЕДЕНИЕ", "ХВ НА СОД-Е ОБЩ.ИМУЩ.", "ГВ НА СОИ (ТЕПЛОНОСИТ)", "ОТОПЛЕНИЕ"]
+    flow = _options_flow(monkeypatch, {"waste_water_tariff": names[0], "hot_water_heating_tariff": names[3]})
+    flow._config_entry.runtime_data.data["accounts"]["42"]["tariffs"] = {str(i): {"name": name} for i, name in enumerate(names)}
+    flow._config_entry.runtime_data.data["accounts"]["43"] = {"tariffs": {"w": {"name": "ОТВЕД. СТОЧ. ВОД СОИ"}}}
+    form = asyncio.run(flow.async_step_tariffs())
+    selectors = {key.schema: value for key, value in form["data_schema"].schema.items()}
+    assert [choice["value"] for choice in selectors["waste_water_tariff"].config["options"]] == ["", names[0]]
+    assert [choice["value"] for choice in selectors["cold_water_tariff"].config["options"]] == ["", names[1]]
+    assert [choice["value"] for choice in selectors["hot_water_tariff"].config["options"]] == ["", names[2], names[1]]
+    assert _suggested(form)["waste_water_tariff"] == names[0]
+    assert form["data_schema"]({}) == {"waste_water_tariff": "", "cold_water_tariff": "", "hot_water_tariff": ""}
+    invalid = asyncio.run(flow.async_step_tariffs({"waste_water_tariff": "ОТВЕД. СТОЧ. ВОД СОИ"}))
+    assert invalid["errors"] == {"base": "invalid_tariff"}
+    selected = {"waste_water_tariff": names[0], "cold_water_tariff": names[1], "hot_water_tariff": names[2]}
+    heating_form = asyncio.run(flow.async_step_tariffs(selected))
+    assert heating_form["step_id"] == "rate_type_unset"
+    assert list(key.schema for key in heating_form["data_schema"].schema) == ["hot_water_heating_tariff", "rate_type"]
+    assert _suggested(heating_form)["hot_water_heating_tariff"] == names[3]
+    invalid = asyncio.run(flow.async_step_rate_type({"hot_water_heating_tariff": "ГВ НА СОИ (ПОДОГРЕВ)", "rate_type": "none"}))
+    assert invalid["errors"] == {"base": "invalid_tariff"}
+    assert asyncio.run(flow.async_step_rate_type({"hot_water_heating_tariff": names[3], "rate_type": "manual"}))["step_id"] == "rate_manual"
+    result = asyncio.run(flow.async_step_rate_manual({"manual_rate": "0.05"}))["data"]["account_options"]["42"]
+    assert {key: result[key] for key in selected} == selected
+    assert result["hot_water_heating_tariff"] == names[3]
+    assert result["water_heating_rate"] == 0.05
+
+
+@pytest.mark.parametrize("hot", ["", "ГОРЯЧЕЕ ВОДОСНАБЖЕНИЕ", "ГВ НА СОД-Е ОБЩ.ИМУЩ."])
+def test_direct_or_empty_hot_tariff_skips_heating_and_preserves_rate(monkeypatch, hot):
+    flow = _options_flow(monkeypatch, {"water_heating_rate": 0.05, "rate_type": "manual", "hot_water_heating_tariff": "ОТОПЛЕНИЕ"})
+    flow._config_entry.runtime_data.data["accounts"]["42"]["tariffs"] = {"hot": {"name": hot}}
+    result = asyncio.run(flow.async_step_tariffs({"hot_water_tariff": hot}))["data"]["account_options"]["42"]
+    assert result["hot_water_tariff"] == hot
+    assert result["waste_water_tariff"] == ""
+    assert result["cold_water_tariff"] == ""
+    assert result["water_heating_rate"] == 0.05
+    assert result["hot_water_heating_tariff"] == "ОТОПЛЕНИЕ"
+
+
+def test_tariff_selection_and_automatic_heating_rate_are_saved_together(monkeypatch):
+    flow = _options_flow(monkeypatch)
+    names = ["ВОДООТВЕДЕНИЕ", "ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ", "ОТОПЛЕНИЕ"]
+    flow._config_entry.runtime_data.data["accounts"]["42"]["tariffs"] = {name: {"name": name} for name in names}
+    form = asyncio.run(flow.async_step_tariffs({"waste_water_tariff": names[0], "cold_water_tariff": names[1], "hot_water_tariff": names[1]}))
+    assert form["step_id"] == "rate_type_unset"
+    auto = asyncio.run(flow.async_step_rate_type_unset({"hot_water_heating_tariff": names[2], "rate_type": "auto"}))
+    assert auto["step_id"] == "rate_auto"
+    preview = asyncio.run(flow.async_step_rate_auto({"heating_system": "closed_external", "building_features": "insulated_without_towel_rails"}))
+    assert preview["step_id"] == "rate_confirm"
+    result = asyncio.run(flow.async_step_rate_confirm({}))["data"]["account_options"]["42"]
+    assert result["hot_water_heating_tariff"] == names[2]
+    assert result["hot_water_tariff"] == names[1]
+    assert result["water_heating_rate"] == 0.05775
+
+
+def test_missing_saved_tariff_is_not_suggested_but_remains_saved_until_submit(monkeypatch):
+    flow = _options_flow(monkeypatch, {"waste_water_tariff": "ВОДООТВЕДЕНИЕ", "hot_water_heating_tariff": "ОТОПЛЕНИЕ"})
+    assert _suggested(asyncio.run(flow.async_step_tariffs()))["waste_water_tariff"] == ""
+    assert _suggested(asyncio.run(flow.async_step_rate_type()))["hot_water_heating_tariff"] == ""
+    assert flow._config_entry.options["account_options"]["42"]["waste_water_tariff"] == "ВОДООТВЕДЕНИЕ"
 
 
 def test_options_none_and_existing_options(monkeypatch):

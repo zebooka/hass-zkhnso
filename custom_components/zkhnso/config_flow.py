@@ -20,13 +20,22 @@ from .api_client import ZKHAPIClient, ZKHAPIConnectionError
 from .const import (
     CONF_ACCOUNT_OPTIONS,
     CONF_BUILDING_FEATURES,
+    CONF_COLD_WATER_TARIFF,
     CONF_HEATING_SYSTEM,
+    CONF_HOT_WATER_HEATING_TARIFF,
+    CONF_HOT_WATER_TARIFF,
     CONF_MANUAL_RATE,
     CONF_PASSWORD,
     CONF_RATE_TYPE,
     CONF_USERNAME,
     CONF_WATER_HEATING_RATE,
+    CONF_WASTE_WATER_TARIFF,
+    COLD_WATER_TARIFFS,
     DOMAIN,
+    HOT_WATER_FLUID_TARIFFS,
+    HOT_WATER_HEATING_TARIFFS,
+    HOT_WATER_TARIFFS,
+    WASTE_WATER_TARIFFS,
 )
 from .water_heating import BUILDING_FEATURES, RATE_TYPES, SYSTEMS, water_heating_rate
 
@@ -51,6 +60,8 @@ STEP_RECONFIGURE_SCHEMA = vol.Schema(
 HEATING_OPTION_KEYS = frozenset({
     CONF_RATE_TYPE, CONF_WATER_HEATING_RATE, CONF_MANUAL_RATE,
     CONF_HEATING_SYSTEM, CONF_BUILDING_FEATURES,
+    CONF_WASTE_WATER_TARIFF, CONF_COLD_WATER_TARIFF,
+    CONF_HOT_WATER_TARIFF, CONF_HOT_WATER_HEATING_TARIFF,
 })
 
 
@@ -147,9 +158,10 @@ class WaterHeatingFlow:
                     return await self.async_step_rate_manual()
                 return await self.async_step_rate_auto()
         options.setdefault(CONF_RATE_TYPE, "none")
-        return self._rate_type_form(vol.Schema({
-            vol.Required(CONF_RATE_TYPE): _select(RATE_TYPES, "rate_type")
-        }), errors)
+        return self._rate_type_form(self._rate_type_schema(), errors)
+
+    def _rate_type_schema(self) -> vol.Schema:
+        return vol.Schema({vol.Required(CONF_RATE_TYPE): _select(RATE_TYPES, "rate_type")})
 
     def _rate_type_form(self, schema: vol.Schema, errors: dict[str, str]):
         """Show the rate type form."""
@@ -337,7 +349,49 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 class ZKHOptionsFlow(WaterHeatingFlow, config_entries.OptionsFlow):
-    """Manage water heating options for an existing entry."""
+    """Manage combined tariff and water heating options for an account."""
+
+    def _rate_form(self, step: str, schema: vol.Schema, errors=None, placeholders=None):
+        options = dict(self._heating_options())
+        for key, allowed in (
+            (CONF_WASTE_WATER_TARIFF, WASTE_WATER_TARIFFS),
+            (CONF_COLD_WATER_TARIFF, COLD_WATER_TARIFFS),
+            (CONF_HOT_WATER_TARIFF, HOT_WATER_TARIFFS + HOT_WATER_FLUID_TARIFFS),
+            (CONF_HOT_WATER_HEATING_TARIFF, HOT_WATER_HEATING_TARIFFS),
+        ):
+            if options.get(key) and options[key] not in self._available_tariffs(allowed):
+                options[key] = ""
+        return self.async_show_form(
+            step_id=step,
+            data_schema=self.add_suggested_values_to_schema(schema, options),
+            errors=errors or {},
+            description_placeholders=placeholders,
+        )
+
+    def _available_tariffs(self, allowed: tuple[str, ...]) -> tuple[str, ...]:
+        accounts = (self.config_entry.runtime_data.data or {}).get("accounts", {})
+        tariffs = accounts.get(self._selected_account, {}).get("tariffs") or {}
+        names = {tariff.get("name") for tariff in tariffs.values() if isinstance(tariff, dict)}
+        return tuple(name for name in allowed if name in names)
+
+    def _tariff_selector(self, allowed: tuple[str, ...]) -> SelectSelector:
+        choices = [{"value": "", "label": "—"}]
+        choices.extend({"value": name, "label": name} for name in self._available_tariffs(allowed))
+        return SelectSelector(SelectSelectorConfig(options=choices, mode=SelectSelectorMode.DROPDOWN))
+
+    def _rate_type_schema(self) -> vol.Schema:
+        return vol.Schema({
+            vol.Optional(CONF_HOT_WATER_HEATING_TARIFF, default=""): self._tariff_selector(HOT_WATER_HEATING_TARIFFS),
+            vol.Required(CONF_RATE_TYPE): _select(RATE_TYPES, "rate_type"),
+        })
+
+    async def async_step_rate_type(self, user_input=None):
+        if user_input is not None:
+            heating = user_input.get(CONF_HOT_WATER_HEATING_TARIFF) or ""
+            if heating and heating not in self._available_tariffs(HOT_WATER_HEATING_TARIFFS):
+                return self._rate_type_form(self._rate_type_schema(), {"base": "invalid_tariff"})
+            self._heating_options()[CONF_HOT_WATER_HEATING_TARIFF] = heating
+        return await super().async_step_rate_type(user_input)
 
     def _existing_heating_options(self) -> dict[str, Any]:
         per_account = _account_options(self.config_entry.options)
@@ -363,7 +417,7 @@ class ZKHOptionsFlow(WaterHeatingFlow, config_entries.OptionsFlow):
             account_id = user_input.get("account_id")
             if account_id in accounts:
                 self._selected_account = account_id
-                return await self.async_step_rate_type()
+                return await self.async_step_tariffs()
             errors = {"base": "invalid_account"}
         else:
             errors = {}
@@ -371,6 +425,31 @@ class ZKHOptionsFlow(WaterHeatingFlow, config_entries.OptionsFlow):
         return self.async_show_form(
             step_id="init", data_schema=vol.Schema({vol.Required("account_id"): SelectSelector(SelectSelectorConfig(options=choices, mode=SelectSelectorMode.DROPDOWN))}), errors=errors,
         )
+
+    async def async_step_tariffs(self, user_input=None):
+        """Select tariffs available for the chosen account."""
+        fields = {
+            CONF_WASTE_WATER_TARIFF: WASTE_WATER_TARIFFS,
+            CONF_COLD_WATER_TARIFF: COLD_WATER_TARIFFS,
+            CONF_HOT_WATER_TARIFF: HOT_WATER_TARIFFS + HOT_WATER_FLUID_TARIFFS,
+        }
+        errors = {}
+        options = self._heating_options()
+        if user_input is not None:
+            selected = {key: user_input.get(key) or "" for key in fields}
+            if any(value and value not in self._available_tariffs(fields[key]) for key, value in selected.items()):
+                errors["base"] = "invalid_tariff"
+            else:
+                options.update(selected)
+                if selected[CONF_HOT_WATER_TARIFF] in HOT_WATER_FLUID_TARIFFS:
+                    return await self.async_step_rate_type()
+                return await self._finish_water_heating()
+
+        schema = vol.Schema({
+            vol.Optional(key, default=""): self._tariff_selector(allowed)
+            for key, allowed in fields.items()
+        })
+        return self._rate_form("tariffs", schema, errors)
 
     async def async_step_rate_type_unset(self, user_input=None):
         """Handle the rate type form when no rate has been saved."""

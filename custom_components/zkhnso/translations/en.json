@@ -43,15 +43,25 @@
     "step": {
       "init": {
         "title": "Select a device",
-        "description": "Select the utility account whose water heating rate you want to configure.",
+        "description": "Select the utility account whose combined tariffs you want to configure.",
         "data": {
           "account_id": "Utility account"
+        }
+      },
+      "tariffs": {
+        "title": "Select tariffs",
+        "description": "Choose tariffs for the combined water prices. An empty selection disables the corresponding calculation.",
+        "data": {
+          "waste_water_tariff": "Waste water tariff",
+          "cold_water_tariff": "Cold water tariff",
+          "hot_water_tariff": "Hot water or heat-transfer fluid tariff"
         }
       },
       "rate_type": {
         "title": "Water heating rate",
         "description": "Choose how to set the heat consumption rate for water heating.",
         "data": {
+          "hot_water_heating_tariff": "Hot water heating tariff",
           "rate_type": "Type"
         },
         "data_description": {
@@ -62,6 +72,7 @@
         "title": "Water heating rate",
         "description": "Choose how to set the heat consumption rate for water heating.",
         "data": {
+          "hot_water_heating_tariff": "Hot water heating tariff",
           "rate_type": "Type"
         },
         "data_description": {
@@ -92,7 +103,8 @@
       "invalid_rate_type": "Select a rate type",
       "invalid_rate": "Enter a finite non-negative number",
       "invalid_selection": "Select a valid system and building features",
-      "invalid_account": "Select an available utility account"
+      "invalid_account": "Select an available utility account",
+      "invalid_tariff": "Select an available tariff"
     },
     "abort": {
       "no_accounts": "No utility accounts are available for configuration"
