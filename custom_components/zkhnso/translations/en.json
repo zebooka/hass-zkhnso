@@ -107,7 +107,8 @@
       "invalid_tariff": "Select an available tariff"
     },
     "abort": {
-      "no_accounts": "No utility accounts are available for configuration"
+      "no_accounts": "No utility accounts are available for configuration",
+      "not_ready": "Integration data is not available yet. Wait for it to finish loading and try again."
     }
   },
   "selector": {

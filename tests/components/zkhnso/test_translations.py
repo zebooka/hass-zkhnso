@@ -51,6 +51,19 @@ def test_reconfigure_success_message_is_translated(language, expected) -> None:
     assert translation["config"]["abort"]["reconfigure_successful"] == expected
 
 
+@pytest.mark.parametrize(
+    ("language", "expected"),
+    [
+        ("ru", "Данные интеграции ещё недоступны. Дождитесь завершения загрузки и попробуйте снова."),
+        ("en", "Integration data is not available yet. Wait for it to finish loading and try again."),
+    ],
+)
+def test_options_not_ready_message_is_translated(language, expected) -> None:
+    translations_dir = Path(config_flow.__file__).parent / "translations"
+    translation = json.loads((translations_dir / f"{language}.json").read_text(encoding="utf-8"))
+    assert translation["options"]["abort"]["not_ready"] == expected
+
+
 @pytest.mark.parametrize("language", ["en", "ru"])
 def test_sensor_names_and_object_ids_use_entity_translations(language) -> None:
     """Home Assistant uses the configured language for names and English for IDs."""

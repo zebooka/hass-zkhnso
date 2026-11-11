@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import math
+from functools import wraps
 from typing import Any
 
 import voluptuous as vol
@@ -348,6 +349,18 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
 
+def _require_options_data(step):
+    """Abort an options step if the integration data is not available."""
+    @wraps(step)
+    async def guarded(self, *args, **kwargs):
+        coordinator = getattr(self.config_entry, "runtime_data", None)
+        if coordinator is None or getattr(coordinator, "data", None) is None:
+            return self.async_abort(reason="not_ready")
+        return await step(self, *args, **kwargs)
+
+    return guarded
+
+
 class ZKHOptionsFlow(WaterHeatingFlow, config_entries.OptionsFlow):
     """Manage combined tariff and water heating options for an account."""
 
@@ -385,6 +398,7 @@ class ZKHOptionsFlow(WaterHeatingFlow, config_entries.OptionsFlow):
             vol.Required(CONF_RATE_TYPE): _select(RATE_TYPES, "rate_type"),
         })
 
+    @_require_options_data
     async def async_step_rate_type(self, user_input=None):
         if user_input is not None:
             heating = user_input.get(CONF_HOT_WATER_HEATING_TARIFF) or ""
@@ -407,6 +421,7 @@ class ZKHOptionsFlow(WaterHeatingFlow, config_entries.OptionsFlow):
 
         return self._rate_form("rate_type", schema, errors, {"rate": str(rate)})
 
+    @_require_options_data
     async def async_step_init(self, user_input=None):
         coordinator = self.config_entry.runtime_data
         data = coordinator.data or {}
@@ -426,6 +441,7 @@ class ZKHOptionsFlow(WaterHeatingFlow, config_entries.OptionsFlow):
             step_id="init", data_schema=vol.Schema({vol.Required("account_id"): SelectSelector(SelectSelectorConfig(options=choices, mode=SelectSelectorMode.DROPDOWN))}), errors=errors,
         )
 
+    @_require_options_data
     async def async_step_tariffs(self, user_input=None):
         """Select tariffs available for the chosen account."""
         fields = {
@@ -454,6 +470,18 @@ class ZKHOptionsFlow(WaterHeatingFlow, config_entries.OptionsFlow):
     async def async_step_rate_type_unset(self, user_input=None):
         """Handle the rate type form when no rate has been saved."""
         return await self.async_step_rate_type(user_input)
+
+    @_require_options_data
+    async def async_step_rate_manual(self, user_input=None):
+        return await super().async_step_rate_manual(user_input)
+
+    @_require_options_data
+    async def async_step_rate_auto(self, user_input=None):
+        return await super().async_step_rate_auto(user_input)
+
+    @_require_options_data
+    async def async_step_rate_confirm(self, user_input=None):
+        return await super().async_step_rate_confirm(user_input)
 
     async def _finish_water_heating(self):
         per_account = _account_options(self.config_entry.options)

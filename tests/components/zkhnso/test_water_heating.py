@@ -75,6 +75,50 @@ def test_options_without_accounts_aborts(monkeypatch):
     assert asyncio.run(flow.async_step_init()) == {"reason": "no_accounts"}
 
 
+@pytest.mark.parametrize("runtime_data", ["missing", None, SimpleNamespace(data=None)])
+def test_options_not_ready_aborts_and_can_be_reopened(monkeypatch, runtime_data):
+    flow = ZKHOptionsFlow()
+    entry = SimpleNamespace(options={})
+    if runtime_data != "missing":
+        entry.runtime_data = runtime_data
+    flow._config_entry = entry
+    monkeypatch.setattr(flow, "async_abort", lambda **kwargs: kwargs)
+    monkeypatch.setattr(flow, "async_show_form", lambda **kwargs: kwargs)
+
+    assert asyncio.run(flow.async_step_init()) == {"reason": "not_ready"}
+    entry.runtime_data = SimpleNamespace(data={"accounts": {"42": {"address": "Адрес"}}})
+    assert asyncio.run(flow.async_step_init())["step_id"] == "init"
+    assert entry.options == {}
+
+
+@pytest.mark.parametrize("step,user_input", [
+    ("init", {"account_id": "42"}),
+    ("tariffs", {"hot_water_tariff": ""}),
+    ("rate_type", {"rate_type": "none"}),
+    ("rate_type_unset", {"rate_type": "none"}),
+    ("rate_manual", {"manual_rate": "0.05"}),
+    ("rate_auto", {"heating_system": SYSTEMS[0], "building_features": BUILDING_FEATURES[0]}),
+    ("rate_confirm", {}),
+])
+def test_options_data_disappearing_between_steps_does_not_save(monkeypatch, step, user_input):
+    flow = _options_flow(monkeypatch, {"rate_type": "manual", "water_heating_rate": 0.1})
+    monkeypatch.setattr(flow, "async_abort", lambda **kwargs: kwargs)
+    create_entry = MagicMock()
+    monkeypatch.setattr(flow, "async_create_entry", create_entry)
+    del flow._config_entry.runtime_data
+
+    assert asyncio.run(getattr(flow, f"async_step_{step}")(user_input)) == {"reason": "not_ready"}
+    create_entry.assert_not_called()
+    assert flow._config_entry.options == {"account_options": {"42": {"rate_type": "manual", "water_heating_rate": 0.1}}}
+
+
+def test_options_loaded_empty_data_reports_no_accounts(monkeypatch):
+    flow = _options_flow(monkeypatch)
+    flow._config_entry.runtime_data.data = {}
+    monkeypatch.setattr(flow, "async_abort", lambda **kwargs: kwargs)
+    assert asyncio.run(flow.async_step_init()) == {"reason": "no_accounts"}
+
+
 def test_tariff_forms_filter_restore_and_validate_account_choices(monkeypatch):
     names = ["ВОДООТВЕДЕНИЕ", "ХВ НА СОД-Е ОБЩ.ИМУЩ.", "ГВ НА СОИ (ТЕПЛОНОСИТ)", "ОТОПЛЕНИЕ"]
     flow = _options_flow(monkeypatch, {"waste_water_tariff": names[0], "hot_water_heating_tariff": names[3]})
