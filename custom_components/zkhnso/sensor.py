@@ -4,15 +4,11 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from homeassistant.components.sensor import (
-    SensorDeviceClass,
-    SensorEntity,
-    SensorStateClass,
-)
+from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfArea, UnitOfEnergy, UnitOfVolume
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo, async_get as async_get_device_registry
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -44,10 +40,19 @@ async def async_setup_entry(
 
     known: set[tuple[str, str, str]] = set()
 
+    device_registry = async_get_device_registry(hass)
+
     def add_new_sensors() -> None:
         accounts = coordinator.data.get("accounts", {}) if isinstance(coordinator.data, dict) else {}
         entities = []
         for account_id, account in accounts.items():
+            device = device_registry.async_get_device(
+                identifiers={(DOMAIN, f"{entry.entry_id}_account_{account_id}")}
+            )
+            company = account.get("company_name")
+            if device is not None and company is not None and device.manufacturer != company:
+                device_registry.async_update_device(device.id, manufacturer=company)
+
             for kind, cls in (("meters", ZKHMeterSensor), ("tariffs", ZKHTariffSensor)):
                 items = account.get(kind)
                 if not isinstance(items, dict):
@@ -57,11 +62,15 @@ async def async_setup_entry(
                     if identity not in known and isinstance(value, dict):
                         entities.append(cls(coordinator, key, value, account_id))
                         known.add(identity)
+
             if account.get("tariffs") and (account_id, "combined", "water") not in known:
                 entities.append(ZKHCombinedColdWaterTariffSensor(coordinator, account_id))
                 account_options = entry.options.get(CONF_ACCOUNT_OPTIONS, {}).get(account_id, {})
                 entities.append(ZKHCombinedHotWaterTariffSensor(coordinator, account_options.get(CONF_WATER_HEATING_RATE), account_id))
                 known.add((account_id, "combined", "water"))
+
+            entities.append(ZKHCompanySensor(coordinator, account_id))
+            known.add((account_id, "company", ""))
         if entities:
             async_add_entities(entities, update_before_add=False)
 
@@ -97,8 +106,35 @@ class ZKHSensor(CoordinatorEntity, SensorEntity):
         return DeviceInfo(
             identifiers={(DOMAIN, self._id_prefix)},
             name=f"№{self._account_id} {(self._account or {}).get('address', '')}".strip(),
+            manufacturer=(self._account or {}).get('company_name'),
+            entry_type=DeviceEntryType.SERVICE,
         )
 
+
+class ZKHCompanySensor(ZKHSensor):
+    def __init__(
+            self,
+            coordinator: ZKHDataUpdateCoordinator,
+            account_id: str,
+    ) -> None:
+        super().__init__(coordinator, account_id)
+        self._attr_unique_id = f"{self._id_prefix}_company"
+        self._attr_translation_key = "company"
+        self._attr_icon = "mdi:briefcase"
+
+    @property
+    def native_value(self) -> float | None:
+        return self._account.get("company_name")
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        account = self._account
+        if account is None:
+            return {}
+
+        return {
+            "address": account.get("company_address"),
+        }
 
 class ZKHMeterSensor(ZKHSensor):
     def __init__(
@@ -115,7 +151,6 @@ class ZKHMeterSensor(ZKHSensor):
         self._attr_translation_placeholders = {
             "name": str(meter.get("name", key)),
             "serial_number": str(meter.get("serial_number")),
-            "account_id": self._account_id,
         }
         self._attr_icon = "mdi:counter"
         self._attr_state_class = SensorStateClass.TOTAL
@@ -176,7 +211,6 @@ class ZKHTariffSensor(ZKHSensor):
         self._attr_translation_key = "tariff"
         self._attr_translation_placeholders = {
             "name": str(tariff.get("name", key)),
-            "account_id": self._account_id,
         }
         self._attr_native_unit_of_measurement = self._normalized_unit(tariff.get("unit"))
         self._attr_icon = "mdi:currency-rub"
@@ -228,7 +262,6 @@ class ZKHCombinedTariffSensor(ZKHSensor):
         self._attr_translation_key = "combined_tariff"
         self._attr_translation_placeholders = {
             "name": str(name),
-            "account_id": self._account_id,
         }
         self._attr_native_unit_of_measurement = f"RUB/{UnitOfVolume.CUBIC_METERS}"
         self._attr_icon = "mdi:sigma"

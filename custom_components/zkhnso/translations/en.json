@@ -125,13 +125,16 @@
   "entity": {
     "sensor": {
       "meter": {
-        "name": "Meter {name} №{serial_number} ({account_id})"
+        "name": "Meter {name} №{serial_number}"
       },
       "tariff": {
-        "name": "Tariff {name} ({account_id})"
+        "name": "Tariff {name}"
       },
       "combined_tariff": {
-        "name": "Combined tariff {name} ({account_id})"
+        "name": "Combined tariff {name}"
+      },
+      "company": {
+        "name": "Housing management company"
       }
     }
   }
