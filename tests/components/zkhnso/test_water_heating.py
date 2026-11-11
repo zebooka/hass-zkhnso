@@ -267,7 +267,7 @@ def test_options_update_reloads_entry():
     reload.assert_awaited_once_with("entry")
 
 
-def test_sensor_setup_with_configured_rate():
+def test_sensor_setup_with_configured_rate(monkeypatch):
     """A configured heating rate does not prevent tariff sensor creation."""
     entry = SimpleNamespace(
         entry_id="entry", data={}, options={"account_options": {"42": {"water_heating_rate": 0.06528}}}
@@ -277,14 +277,17 @@ def test_sensor_setup_with_configured_rate():
         data={"accounts": {"42": {"address": "Адрес", "tariffs": {"water": {"name": "Water", "unit": "куб.м.", "rate_per_unit": 50.25}}}}},
     )
     add_entities = MagicMock()
+    monkeypatch.setattr("custom_components.zkhnso.sensor.async_get_device_registry", lambda _: SimpleNamespace(async_get_device=lambda **_: None))
     asyncio.run(async_setup_entry(None, entry, add_entities))
     add_entities.assert_called_once()
     args, kwargs = add_entities.call_args
     assert kwargs == {"update_before_add": False}
-    assert len(args[0]) == 3
+    assert len(args[0]) == 4
     assert sum(isinstance(entity, ZKHCombinedColdWaterTariffSensor) for entity in args[0]) == 1
     assert sum(isinstance(entity, ZKHCombinedHotWaterTariffSensor) for entity in args[0]) == 1
     sensor = next(entity for entity in args[0] if isinstance(entity, ZKHTariffSensor))
     assert isinstance(sensor, ZKHTariffSensor)
     assert sensor.unique_id == "entry_account_42_tariff_water"
     assert sensor.native_value == 50.25
+    hot = next(entity for entity in args[0] if isinstance(entity, ZKHCombinedHotWaterTariffSensor))
+    assert hot._water_heating_rate == 0.06528

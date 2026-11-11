@@ -69,7 +69,9 @@ def test_sensor_names_and_object_ids_use_entity_translations(language) -> None:
         entity.platform = SimpleNamespace(platform_name="zkhnso", domain="sensor",
             platform_translations=platform_translations(language), object_id_platform_translations=platform_translations("en"),
             component_translations={}, object_id_component_translations={})
+        if hasattr(entity, "platform_data"):
+            entity.platform_data = entity.platform
         assert entity.name == platform_translations(language)[f"component.zkhnso.entity.sensor.{entity.translation_key}.name"].format(**entity.translation_placeholders)
-    assert slugify(f"{meter.device_info['name']} {meter.suggested_object_id}") == "no43_adres_2_meter_gaz_no222_43"
-    assert slugify(f"{tariff.device_info['name']} {tariff.suggested_object_id}") == "no43_adres_2_tariff_gaz_43"
-    assert slugify(f"{combined.device_info['name']} {combined.suggested_object_id}") == "no43_adres_2_combined_tariff_kholodnoe_vodosnabzhenie_43"
+    assert slugify(f"{meter.device_info['name']} {meter.suggested_object_id}") == "no43_adres_2_meter_gaz_no222"
+    assert slugify(f"{tariff.device_info['name']} {tariff.suggested_object_id}") == "no43_adres_2_tariff_gaz"
+    assert slugify(f"{combined.device_info['name']} {combined.suggested_object_id}") == "no43_adres_2_combined_tariff_kholodnoe_vodosnabzhenie"

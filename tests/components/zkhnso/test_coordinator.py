@@ -127,7 +127,8 @@ def test_http_session_fetches_distinct_accounts_and_creates_sensors(monkeypatch)
             coordinator.data = await coordinator._async_update_data()
             coordinator.async_add_listener = lambda callback: lambda: None
             added = MagicMock()
-            await async_setup_entry(None, SimpleNamespace(runtime_data=coordinator, options={}, async_on_unload=MagicMock()), added)
+            monkeypatch.setattr("custom_components.zkhnso.sensor.async_get_device_registry", lambda _: SimpleNamespace(async_get_device=lambda **_: None))
+            await async_setup_entry(None, SimpleNamespace(entry_id="entry", runtime_data=coordinator, options={}, async_on_unload=MagicMock()), added)
             entities = added.call_args.args[0]
             meters = {(e._account_id, e.key): e.native_value for e in entities if isinstance(e, ZKHMeterSensor)}
             tariffs_by_account = {(e._account_id, e.key): e.native_value for e in entities if isinstance(e, ZKHTariffSensor)}

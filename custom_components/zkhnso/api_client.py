@@ -133,17 +133,7 @@ class ZKHAPIClient:
 
     @staticmethod
     def _log_page_diagnostics(page_name: str, response: aiohttp.ClientResponse, html_content: str) -> None:
-        """Log safe response markers without exposing response content or secrets."""
-        _LOGGER.debug(
-            "%s response: status=%d, url=%s, login_form=%s, counters_form=%s, "
-            "tariffs_form=%s",
-            page_name,
-            response.status,
-            response.url,
-            ZKHAPIClient._is_login_page(html_content),
-            'id="countersForm"' in html_content or "id='countersForm'" in html_content,
-            'id="tariffsForm"' in html_content or "id='tariffsForm'" in html_content,
-        )
+        _LOGGER.debug("%s response: status=%d, url=%s", page_name, response.status, response.url)
 
     async def login(self) -> bool:
         """Log in, returning False only when the login form is returned."""

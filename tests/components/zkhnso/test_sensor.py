@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 
 from homeassistant.components.sensor import SensorDeviceClass
 from homeassistant.const import UnitOfEnergy, UnitOfVolume
+from homeassistant.helpers.device_registry import DeviceEntryType
 
 import pytest
 
@@ -14,6 +15,7 @@ from custom_components.zkhnso.sensor import (
     ZKHCombinedTariffSensor,
     ZKHCombinedColdWaterTariffSensor,
     ZKHCombinedHotWaterTariffSensor,
+    ZKHCompanySensor,
     ZKHMeterSensor,
     ZKHTariffSensor,
     async_setup_entry,
@@ -30,26 +32,37 @@ def _coordinator(data: dict) -> SimpleNamespace:
     )
 
 
-def test_entry_sensors_share_account_device() -> None:
+@pytest.fixture
+def device_registry(monkeypatch):
+    registry = MagicMock()
+    registry.async_get_device.return_value = None
+    monkeypatch.setattr("custom_components.zkhnso.sensor.async_get_device_registry", lambda hass: registry)
+    return registry
+
+
+def test_entry_sensors_share_account_device(device_registry) -> None:
     """Meters and tariff sensors use the account-specific device and IDs."""
     meter = {"name": "Вода", "unit": "куб.м.", "value": 12.5}
     tariff = {"name": "Water", "unit": "куб.м.", "rate_per_unit": 10}
     coordinator = _coordinator({"meters": {"1": meter}, "tariffs": {"water": tariff}})
-    entry = SimpleNamespace(runtime_data=coordinator, options={})
+    entry = SimpleNamespace(entry_id="entry", runtime_data=coordinator, options={})
     add_entities = MagicMock()
     asyncio.run(async_setup_entry(None, entry, add_entities))
 
     entities = add_entities.call_args.args[0]
-    assert len(entities) == 4
+    assert len(entities) == 5
     assert {entity.unique_id for entity in entities} == {
         "entry_account_42_meter_1", "entry_account_42_tariff_water",
         "entry_account_42_combined_tariff_ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ",
         "entry_account_42_combined_tariff_ГОРЯЧЕЕ ВОДОСНАБЖЕНИЕ",
+        "entry_account_42_company",
     }
     for entity in entities:
         assert entity.device_info == {
             "identifiers": {("zkhnso", "entry_account_42")},
             "name": "№42 Новосибирск, ул. Ленина, 1",
+            "manufacturer": None,
+            "entry_type": DeviceEntryType.SERVICE,
         }
         assert entity.has_entity_name is True
 
@@ -66,7 +79,7 @@ def test_different_entries_have_separate_devices() -> None:
     assert first_sensor.unique_id != second_sensor.unique_id
 
 
-def test_multiple_accounts_are_isolated_and_new_accounts_are_discovered() -> None:
+def test_multiple_accounts_are_isolated_and_new_accounts_are_discovered(device_registry) -> None:
     def account(address, reading, rate):
         return {"address": address, "meters": {"1": {"name": "Вода", "unit": "куб.м.", "value": reading}},
                 "tariffs": {"water": {"name": "Water", "unit": "куб.м.", "rate_per_unit": rate}}}
@@ -74,18 +87,18 @@ def test_multiple_accounts_are_isolated_and_new_accounts_are_discovered() -> Non
     coordinator = _coordinator({"accounts": {"42": account("Адрес 1", 10, 20), "43": account("Адрес 2", 30, 40)}})
     listener = []
     coordinator.async_add_listener = lambda callback: listener.append(callback) or (lambda: None)
-    entry = SimpleNamespace(runtime_data=coordinator, options={}, async_on_unload=MagicMock())
+    entry = SimpleNamespace(entry_id="entry", runtime_data=coordinator, options={}, async_on_unload=MagicMock())
     add_entities = MagicMock()
     asyncio.run(async_setup_entry(None, entry, add_entities))
     entities = add_entities.call_args.args[0]
-    assert len(entities) == 8
-    assert len({entity.unique_id for entity in entities}) == 8
+    assert len(entities) == 10
+    assert len({entity.unique_id for entity in entities}) == 10
     meters = {entity._account_id: entity for entity in entities if isinstance(entity, ZKHMeterSensor)}
     tariffs = {entity._account_id: entity for entity in entities if isinstance(entity, ZKHTariffSensor)}
     assert meters["42"].unique_id == "entry_account_42_meter_1"
     assert meters["43"].unique_id == "entry_account_43_meter_1"
-    assert meters["42"].device_info == {"identifiers": {("zkhnso", "entry_account_42")}, "name": "№42 Адрес 1"}
-    assert meters["43"].device_info == {"identifiers": {("zkhnso", "entry_account_43")}, "name": "№43 Адрес 2"}
+    assert meters["42"].device_info == {"identifiers": {("zkhnso", "entry_account_42")}, "name": "№42 Адрес 1", "manufacturer": None, "entry_type": DeviceEntryType.SERVICE}
+    assert meters["43"].device_info == {"identifiers": {("zkhnso", "entry_account_43")}, "name": "№43 Адрес 2", "manufacturer": None, "entry_type": DeviceEntryType.SERVICE}
     assert (meters["42"].native_value, meters["43"].native_value) == (10, 30)
     assert (tariffs["42"].native_value, tariffs["43"].native_value) == (20, 40)
     coordinator.data["accounts"]["43"] = account("Новый адрес", 31, 41)
@@ -94,11 +107,36 @@ def test_multiple_accounts_are_isolated_and_new_accounts_are_discovered() -> Non
     assert meters["43"].device_info["name"] == "№43 Новый адрес"
     coordinator.data["accounts"]["44"] = account("Адрес 3", 50, 60)
     listener[0]()
-    assert len(add_entities.call_args.args[0]) == 4
+    assert len(add_entities.call_args.args[0]) == 5
     listener[0]()
     assert add_entities.call_count == 2
     del coordinator.data["accounts"]["43"]
     assert meters["43"].native_value is None
+    company = next(entity for entity in entities if isinstance(entity, ZKHCompanySensor) and entity._account_id == "43")
+    assert company.native_value is None
+
+
+def test_company_sensor_and_device_manufacturer_update_without_duplicates(device_registry) -> None:
+    coordinator = _coordinator({"company_name": "Первая УК"})
+    listeners = []
+    coordinator.async_add_listener = lambda callback: listeners.append(callback) or (lambda: None)
+    device = SimpleNamespace(id="device-42", manufacturer="Первая УК")
+    device_registry.async_get_device.return_value = device
+    entry = SimpleNamespace(entry_id="entry", runtime_data=coordinator, options={}, async_on_unload=MagicMock())
+    added = MagicMock()
+    asyncio.run(async_setup_entry(None, entry, added))
+    company = next(entity for entity in added.call_args.args[0] if isinstance(entity, ZKHCompanySensor))
+    assert company.native_value == "Первая УК"
+    device_registry.async_update_device.assert_not_called()
+
+    coordinator.data["accounts"]["42"]["company_name"] = "Новая УК"
+    listeners[0]()
+    assert company.native_value == "Новая УК"
+    device_registry.async_get_device.assert_called_with(identifiers={("zkhnso", "entry_account_42")})
+    device_registry.async_update_device.assert_called_once_with("device-42", manufacturer="Новая УК")
+    added.assert_called_once()
+    coordinator.data = None
+    assert company.native_value is None
 
 
 def test_combined_tariffs_use_only_their_own_account() -> None:
@@ -251,7 +289,7 @@ def test_combined_tariff_sensor_properties() -> None:
     sensor = ZKHCombinedTariffSensor(_coordinator({}), "Test", "42")
     assert sensor.unique_id == "entry_account_42_combined_tariff_Test"
     assert sensor.translation_key == "combined_tariff"
-    assert sensor.translation_placeholders == {"name": "Test", "account_id": "42"}
+    assert sensor.translation_placeholders == {"name": "Test"}
     assert sensor.native_unit_of_measurement == "RUB/m³"
     assert sensor.icon == "mdi:sigma"
 
@@ -343,9 +381,9 @@ def test_combined_cold_water_priority_and_coordinator_updates() -> None:
     assert sensor.extra_state_attributes == {}
 
 
-def test_setup_adds_combined_water_tariff_sensors() -> None:
+def test_setup_adds_combined_water_tariff_sensors(device_registry) -> None:
     coordinator = _coordinator({"tariffs": {"water": _tariff("ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ", 10)}})
-    entry = SimpleNamespace(runtime_data=coordinator, options={})
+    entry = SimpleNamespace(entry_id="entry", runtime_data=coordinator, options={})
     add_entities = MagicMock()
     asyncio.run(async_setup_entry(None, entry, add_entities))
     add_entities.assert_called_once()
@@ -429,14 +467,14 @@ def test_combined_hot_water_without_heating_rate() -> None:
 
 
 @pytest.mark.parametrize("options", [{}, {"water_heating_rate": None}])
-def test_setup_combined_hot_water_without_heating_rate(options) -> None:
+def test_setup_combined_hot_water_without_heating_rate(options, device_registry) -> None:
     """Missing and explicitly unset options both yield an unknown value."""
     coordinator = _coordinator({"tariffs": {
         "waste": _tariff("ВОДООТВЕДЕНИЕ", 5),
         "fluid": _tariff("ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ", 10),
         "heating": _tariff("ОТОПЛЕНИЕ", 1000, unit="Гкал"),
     }})
-    entry = SimpleNamespace(runtime_data=coordinator, options=options)
+    entry = SimpleNamespace(entry_id="entry", runtime_data=coordinator, options=options)
     add_entities = MagicMock()
     asyncio.run(async_setup_entry(None, entry, add_entities))
     sensor = next(entity for entity in add_entities.call_args.args[0]
@@ -493,13 +531,13 @@ def test_combined_hot_water_priority_and_coordinator_updates() -> None:
     assert sensor.extra_state_attributes == {}
 
 
-def test_setup_passes_heating_rate_to_combined_hot_water_sensor() -> None:
+def test_setup_passes_heating_rate_to_combined_hot_water_sensor(device_registry) -> None:
     coordinator = _coordinator({"tariffs": {
         "waste": _tariff("ВОДООТВЕДЕНИЕ", 5),
         "fluid": _tariff("ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ", 10),
         "heating": _tariff("ОТОПЛЕНИЕ", 1000, unit="Гкал"),
     }})
-    entry = SimpleNamespace(runtime_data=coordinator, options={"account_options": {"42": {"water_heating_rate": 0.05}}})
+    entry = SimpleNamespace(entry_id="entry", runtime_data=coordinator, options={"account_options": {"42": {"water_heating_rate": 0.05}}})
     add_entities = MagicMock()
     asyncio.run(async_setup_entry(None, entry, add_entities))
     entities = add_entities.call_args.args[0]
@@ -507,12 +545,12 @@ def test_setup_passes_heating_rate_to_combined_hot_water_sensor() -> None:
     assert sensor.native_value == 65
 
 
-def test_heating_rate_is_independent_per_account_and_ignores_legacy_rate() -> None:
+def test_heating_rate_is_independent_per_account_and_ignores_legacy_rate(device_registry) -> None:
     tariffs = {"waste": _tariff("ВОДООТВЕДЕНИЕ", 5), "fluid": _tariff("ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ", 10), "heating": _tariff("ОТОПЛЕНИЕ", 1000, unit="Гкал")}
     coordinator = _coordinator({"accounts": {number: {"address": number, "tariffs": tariffs} for number in ("42", "43", "44")}})
     options = {"water_heating_rate": 0.9, "account_options": {"42": {"water_heating_rate": 0.05}, "43": {"water_heating_rate": 0.02}}}
     add_entities = MagicMock()
-    asyncio.run(async_setup_entry(None, SimpleNamespace(runtime_data=coordinator, options=options), add_entities))
+    asyncio.run(async_setup_entry(None, SimpleNamespace(entry_id="entry", runtime_data=coordinator, options=options), add_entities))
     sensors = {sensor._account_id: sensor for sensor in add_entities.call_args.args[0] if isinstance(sensor, ZKHCombinedHotWaterTariffSensor)}
     assert sensors["42"].native_value == 65
     assert sensors["43"].native_value == 35

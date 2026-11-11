@@ -69,8 +69,9 @@ async def async_setup_entry(
                 entities.append(ZKHCombinedHotWaterTariffSensor(coordinator, account_options.get(CONF_WATER_HEATING_RATE), account_id))
                 known.add((account_id, "combined", "water"))
 
-            entities.append(ZKHCompanySensor(coordinator, account_id))
-            known.add((account_id, "company", ""))
+            if (account_id, "company", "") not in known:
+                entities.append(ZKHCompanySensor(coordinator, account_id))
+                known.add((account_id, "company", ""))
         if entities:
             async_add_entities(entities, update_before_add=False)
 
@@ -123,8 +124,8 @@ class ZKHCompanySensor(ZKHSensor):
         self._attr_icon = "mdi:briefcase"
 
     @property
-    def native_value(self) -> float | None:
-        return self._account.get("company_name")
+    def native_value(self) -> str | None:
+        return (self._account or {}).get("company_name")
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
