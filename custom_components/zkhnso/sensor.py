@@ -176,6 +176,19 @@ class ZKHMeterSensor(ZKHSensor):
             self._attr_device_class = SensorDeviceClass.ENERGY
             self._attr_native_unit_of_measurement = UnitOfEnergy.GIGA_CALORIE
 
+    async def async_added_to_hass(self) -> None:
+        """Check the meter on setup and subscribe to coordinator updates."""
+        await super().async_added_to_hass()
+        self._schedule_verification_check()
+
+    def _handle_coordinator_update(self) -> None:
+        """Check the current meter after every successful refresh."""
+        super()._handle_coordinator_update()
+        self._schedule_verification_check()
+
+    def _schedule_verification_check(self) -> None:
+        self.hass.async_create_task(self.coordinator.verification_alerts.async_check(self))
+
     @property
     def _meter(self) -> dict | None:
         account = self._account

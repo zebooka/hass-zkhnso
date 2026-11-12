@@ -6,12 +6,15 @@ from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 
 from .coordinator import ZKHDataUpdateCoordinator
+from .verification_alerts import MeterVerificationAlerts
 
 PLATFORMS: list[Platform] = [Platform.SENSOR]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = ZKHDataUpdateCoordinator(hass, entry)
+    coordinator.verification_alerts = MeterVerificationAlerts(hass, entry.entry_id)
+    await coordinator.verification_alerts.async_load()
     await coordinator.async_config_entry_first_refresh()
     entry.runtime_data = coordinator
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)

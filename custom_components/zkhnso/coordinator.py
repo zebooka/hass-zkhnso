@@ -12,6 +12,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .api_client import ZKHAPIClient, ZKHAPIConnectionError
 from .const import CONF_PASSWORD, CONF_USERNAME, DOMAIN
+from .verification_alerts import MeterVerificationAlerts
 
 _LOGGER = logging.getLogger(__name__)
 SCAN_INTERVAL = timedelta(hours=1)
@@ -19,6 +20,8 @@ SCAN_INTERVAL = timedelta(hours=1)
 
 class ZKHDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Fetch meter and tariff data from the ZKHNSO personal account."""
+
+    verification_alerts: MeterVerificationAlerts
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         super().__init__(

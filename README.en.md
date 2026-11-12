@@ -54,9 +54,33 @@ Settings from previous versions are incompatible with the new version: remove th
 ## Features
 
 - Retrieves active meters, including serial number, meter type, next verification date, current reading, and the date of the most recent reading submission.
+- Retrieves archived meters.
 - Retrieves tariffs and usage norms.
+- Retrieves the utility account number, address, and management company name and address.
+- Emits an event when a meter's verification date approaches.
 
 Data is updated once per hour. The integration creates a separate device with meter and tariff sensors for each utility account. Select the account and tariffs in the integration options; if using a heat-transfer fluid tariff, also configure the heating tariff and rate.
+
+### Meter verification event
+
+The `zkhnso_meter_verification_alert` event fires when an enabled active meter sensor is 30 calendar days or less away from its verification date, including overdue dates. It fires at most once per meter and verification date, including across Home Assistant restarts. A changed date can trigger a new event. Archived and disabled meters are not checked.
+
+Event data contains `entry_id`, `entity_id`, `account_id`, `meter_id`, `serial_number`, `name`, `next_verification_date` and `days_left`, which is negative for overdue dates; it does not contain an address. Home Assistant's event bus does not persist events, so an automation not yet loaded at startup may miss an alert. The sent marker is saved before firing, so a failure between these operations can also result in a missed event.
+
+```yaml
+automation:
+  - alias: Meter verification
+    triggers:
+      - trigger: event
+        event_type: zkhnso_meter_verification_alert
+    actions:
+      - action: persistent_notification.create
+        data:
+          title: Meter verification is approaching
+          message: >-
+            {{ trigger.event.data.name }} #{{ trigger.event.data.serial_number }}:
+            verification on {{ trigger.event.data.next_verification_date }}.
+```
 
 ## Calculating meter costs
 
