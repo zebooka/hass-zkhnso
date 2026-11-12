@@ -78,8 +78,10 @@ automation:
         data:
           title: Meter verification is approaching
           message: >-
-            {{ trigger.event.data.name }} #{{ trigger.event.data.serial_number }}:
-            verification on {{ trigger.event.data.next_verification_date }}.
+            {{ trigger.event.data.name }} #{{ trigger.event.data.serial_number }},
+            Acct.No.: #{{ trigger.event.data.account_id }}:
+            verification on {{ trigger.event.data.next_verification_date | as_timestamp |
+            timestamp_custom('%d.%m.%Y') }}
 ```
 
 ## Calculating meter costs
