@@ -257,10 +257,11 @@ class ZKHCombinedTariffSensor(ZKHSensor):
         account_id: str
     ) -> None:
         super().__init__(coordinator, account_id)
+        self.name = str(name)
         self._attr_unique_id = f"{self._id_prefix}_combined_tariff_{name}"
         self._attr_translation_key = "combined_tariff"
         self._attr_translation_placeholders = {
-            "name": str(name),
+            "name": self.name,
         }
         self._attr_native_unit_of_measurement = f"RUB/{UnitOfVolume.CUBIC_METERS}"
         self._attr_icon = "mdi:sigma"
@@ -324,6 +325,7 @@ class ZKHCombinedColdWaterTariffSensor(ZKHCombinedTariffSensor):
         dates = [waste_water.get("from_date"), cold_water.get("from_date")]
 
         return {
+            "name": self.name,
             "names": [waste_water.get("name"), cold_water.get("name")],
             "formula": f"{waste_water.get('name')} + {cold_water.get('name')}",
             "from_date": max((date for date in dates if date is not None), default=None),
@@ -388,6 +390,7 @@ class ZKHCombinedHotWaterTariffSensor(ZKHCombinedTariffSensor):
         if hot_water is not None:
             dates.append(hot_water.get("from_date"))
             return {
+                "name": self.name,
                 "names": [waste_water.get("name"), hot_water.get("name")],
                 "formula": f"{waste_water.get('name')} + {hot_water.get('name')}",
                 "from_date": max((date for date in dates if date is not None), default=None),
@@ -402,6 +405,7 @@ class ZKHCombinedHotWaterTariffSensor(ZKHCombinedTariffSensor):
             dates.append(hot_water_fluid.get("from_date"))
             dates.append(hot_water_heating.get("from_date"))
             return {
+                "name": self.name,
                 "names": [waste_water.get("name"), hot_water_fluid.get("name"), hot_water_heating.get("name")],
                 "formula": f"{waste_water.get('name')} + {hot_water_fluid.get('name')} + {hot_water_heating.get('name')} × {self._water_heating_rate}",
                 "from_date": max((date for date in dates if date is not None), default=None),

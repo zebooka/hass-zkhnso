@@ -60,11 +60,9 @@ Data is updated once per hour. The integration creates a separate device with me
 
 ## Calculating meter costs
 
-To calculate water costs in the **Energy** dashboard, configure combined tariffs in the integration options or create tariff sensors manually using templates.
+To calculate water costs in the **Energy** dashboard, combined tariffs are required because water costs are calculated using several tariffs. Configure combined tariffs in the integration options.
 
-### Automatic combined tariffs
-
-Automatic combined tariffs require several conditions. First, the management company must provide the following tariff options through ZKHNSO:
+Calculating combined tariffs requires several conditions. First, the management company must provide the following tariff options through ZKHNSO:
 
 - For wastewater: `ВОДООТВЕДЕНИЕ` or `ОТВЕД. СТОЧ. ВОД СОИ`.
 - For cold water: `ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ` or `ХВ НА СОД-Е ОБЩ.ИМУЩ.`.
@@ -76,59 +74,7 @@ Automatic combined tariffs require several conditions. First, the management com
 
 Second, if heating tariffs are used to calculate the combined hot-water tariff, the **water heating rate** must be set in the integration settings. It can be entered manually or calculated automatically based on the [building features and hot-water system type](#thermal-energy-consumption-standard-for-heating-cold-water-in-novosibirsk-oblast).
 
-Select tariffs for each account in the integration options. The previous automatic selection is no longer used, so tariffs must be selected again. An empty selection or an unavailable selected tariff makes the corresponding combined tariff unknown.
-
-### Combined tariffs using template sensors
-
-You can create a template sensor in two ways: through the user interface or through `configuration.yaml`. The latter is preferable because it allows template editing, but it requires access to the **Home Assistant** file system.
-
-#### Creating a template sensor through the user interface
-
-1. Open **Settings → Devices & services**.
-2. Open the **Helpers** tab.
-3. Select `+ Create helper`.
-4. Search for **Template**, then choose the **Sensor** subtype.
-5. Specify the name, state template, unit of measurement (`RUB/m³`), device (**ZKHNSO**), and an availability template in advanced settings.
-
-#### Creating a template sensor through configuration.yaml
-
-Add the required sensors to `configuration.yaml`. Example configuration:
-
-```yaml
-template:
-  - sensor:
-      - name: tariff_hot_water
-        unique_id: tariff_hot_water
-        icon: "mdi:chart-box-outline"
-        state: >
-          {{ (
-            (states('sensor.tariff_otved_stoch_vod_soi_1234567890') | float(0))
-            + (states('sensor.tariff_gv_na_soi_teplonosit_1234567890') | float(0))
-            + (states('sensor.tariff_gv_na_soi_podogrev_1234567890') | float(0))
-            * 0.06528
-          ) | round(2) }}
-        availability: >
-          {{
-            states('sensor.tariff_otved_stoch_vod_soi_1234567890') not in ['unknown', 'unavailable', 'none']
-            and states('sensor.tariff_gv_na_soi_teplonosit_1234567890') not in ['unknown', 'unavailable', 'none']
-            and states('sensor.tariff_gv_na_soi_podogrev_1234567890') not in ['unknown', 'unavailable', 'none']
-          }}
-        unit_of_measurement: "RUB/m³"
-      - name: tariff_cold_water
-        unique_id: tariff_cold_water
-        icon: "mdi:chart-box-outline"
-        state: >
-          {{ (
-            (states('sensor.tariff_otved_stoch_vod_soi_1234567890') | float(0))
-            + (states('sensor.tariff_khv_na_sod_e_obshch_imushch_1234567890') | float(0))
-          ) | round(2) }}
-        availability: >
-          {{
-            states('sensor.tariff_otved_stoch_vod_soi_1234567890') not in ['unknown', 'unavailable', 'none']
-            and states('sensor.tariff_khv_na_sod_e_obshch_imushch_1234567890') not in ['unknown', 'unavailable', 'none']
-          }}
-        unit_of_measurement: "RUB/m³"
-```
+Select tariffs for each account in the integration options. The automatic selection used in version `1.1.x` is no longer available, so tariffs must be selected again. An empty selection or an unavailable selected tariff makes the corresponding combined tariff unknown.
 
 ### Thermal energy consumption standard for heating cold water in Novosibirsk Oblast
 
