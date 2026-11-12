@@ -332,7 +332,7 @@ class ZKHAPIClient:
 
     def _process_meters_data(self, rows: list[list[str]]) -> dict[str, Any]:
         """Process table rows into meters data structure."""
-        if not rows or len(rows) < 2:
+        if not rows or len(rows) < 2 or (len(rows) == 2 and len(rows[1]) == 1):
             return {}
 
         meters = {}
@@ -366,7 +366,7 @@ class ZKHAPIClient:
 
     def _process_archive_meters_data(self, rows: list[list[str]]) -> dict[str, Any]:
         """Process table rows into archive meters data structure."""
-        if not rows or len(rows) < 2:
+        if not rows or len(rows) < 2 or (len(rows) == 2 and len(rows[1]) == 1):
             return {}
 
         meters = {}
