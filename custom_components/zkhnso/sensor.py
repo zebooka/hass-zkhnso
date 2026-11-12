@@ -112,6 +112,9 @@ class ZKHSensor(CoordinatorEntity, SensorEntity):
 
 
 class ZKHCompanySensor(ZKHSensor):
+    _attr_icon = "mdi:briefcase"
+    _attr_translation_key = "company"
+
     def __init__(
             self,
             coordinator: ZKHDataUpdateCoordinator,
@@ -119,8 +122,7 @@ class ZKHCompanySensor(ZKHSensor):
     ) -> None:
         super().__init__(coordinator, account_id)
         self._attr_unique_id = f"{self._id_prefix}_company"
-        self._attr_translation_key = "company"
-        self._attr_icon = "mdi:briefcase"
+
 
     @property
     def native_value(self) -> str | None:
@@ -138,6 +140,9 @@ class ZKHCompanySensor(ZKHSensor):
         }
 
 class ZKHMeterSensor(ZKHSensor):
+    _attr_translation_key = "meter"
+    _attr_state_class = SensorStateClass.TOTAL
+
     def __init__(
         self,
         coordinator: ZKHDataUpdateCoordinator,
@@ -148,13 +153,11 @@ class ZKHMeterSensor(ZKHSensor):
         super().__init__(coordinator, account_id)
         self._meter_key = key
         self._attr_unique_id = f"{self._id_prefix}_meter_{key}"
-        self._attr_translation_key = "meter"
         self._attr_translation_placeholders = {
             "name": str(meter.get("name", key)),
             "serial_number": str(meter.get("serial_number")),
         }
         self._attr_entity_registry_enabled_default = not meter.get("is_archived", False)
-        self._attr_state_class = SensorStateClass.TOTAL
 
         meter_name_lower = str(meter.get("name")).casefold()
         unit = meter.get("unit")
@@ -200,10 +203,14 @@ class ZKHMeterSensor(ZKHSensor):
             "unit": meter.get("unit"),
             "date": meter.get("date"),
             "next_verification_date": meter.get("next_verification_date"),
+            "is_archived": bool(meter.get("is_archived", False)),
         }
 
 
 class ZKHTariffSensor(ZKHSensor):
+    _attr_icon = "mdi:currency-rub"
+    _attr_translation_key = "tariff"
+
     def __init__(
         self,
         coordinator: ZKHDataUpdateCoordinator,
@@ -214,12 +221,10 @@ class ZKHTariffSensor(ZKHSensor):
         super().__init__(coordinator, account_id)
         self._tariff_key = key
         self._attr_unique_id = f"{self._id_prefix}_tariff_{key}"
-        self._attr_translation_key = "tariff"
         self._attr_translation_placeholders = {
             "name": str(tariff.get("name", key)),
         }
         self._attr_native_unit_of_measurement = self._normalized_unit(tariff.get("unit"))
-        self._attr_icon = "mdi:currency-rub"
 
     @property
     def _tariff(self) -> dict | None:
@@ -257,6 +262,10 @@ class ZKHTariffSensor(ZKHSensor):
         return f"RUB/{unit}" if unit else "RUB"
 
 class ZKHCombinedTariffSensor(ZKHSensor):
+    _attr_translation_key = "combined_tariff"
+    _attr_icon = "mdi:sigma"
+    _attr_native_unit_of_measurement = f"RUB/{UnitOfVolume.CUBIC_METERS}"
+
     def __init__(
         self,
         coordinator: ZKHDataUpdateCoordinator,
@@ -266,12 +275,7 @@ class ZKHCombinedTariffSensor(ZKHSensor):
         super().__init__(coordinator, account_id)
         self._tariff_name = str(name)
         self._attr_unique_id = f"{self._id_prefix}_combined_tariff_{name}"
-        self._attr_translation_key = "combined_tariff"
-        self._attr_translation_placeholders = {
-            "name": self._tariff_name,
-        }
-        self._attr_native_unit_of_measurement = f"RUB/{UnitOfVolume.CUBIC_METERS}"
-        self._attr_icon = "mdi:sigma"
+        self._attr_translation_placeholders = {"name": self._tariff_name}
 
     @property
     def _tariff_options(self) -> dict[str, Any]:
@@ -303,8 +307,6 @@ class ZKHCombinedTariffSensor(ZKHSensor):
         return None
 
 class ZKHCombinedTariffFormulaSensor(ZKHSensor):
-    """Expose the formula of a combined tariff as a diagnostic sensor."""
-
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_icon = "mdi:function-variant"
     _attr_translation_key = "combined_tariff_formula"
