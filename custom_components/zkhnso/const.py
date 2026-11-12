@@ -11,6 +11,7 @@ API_URL_MAIN = "main.action"
 API_URL_DETAILS = "accountDetailsPopup.action"
 API_URL_TARIFFS = "tariffs.action"
 API_URL_METERS = "counters.action"
+API_URL_ARCHIVED_METERS = "counters!mode.action?showOff=true"
 
 # Session keys
 SESSION_JSESSIONID = "JSESSIONID"

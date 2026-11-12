@@ -42,12 +42,12 @@ def test_nested_and_table_extraction() -> None:
         HTML,
         {"selector": "table", "children": {"name": "td", "value": {"selector": "td:nth-of-type(2)"}}},
     ) == {"name": "Meter", "value": "12"}
-    rows = extract_cells_from_table_rows(HTML, "#data tr")
+    rows = extract_cells_from_table_rows(HTML, "#data tr", "Data")
     assert [[extract_cell_text(cell) for cell in row] for row in rows] == [
         ["Name", "Value"],
         ["Meter", "12"],
     ]
-    assert extract_cells_from_table_rows(HTML, ".missing") is None
+    assert extract_cells_from_table_rows(HTML, ".missing", "Data") is None
 
 HTML_WITH_LINKS = """
 <table class="accounts-grid soft"><tbody>
@@ -57,7 +57,7 @@ HTML_WITH_LINKS = """
 """
 
 def test_links_extraction() -> None:
-    rows = extract_cells_from_table_rows(HTML_WITH_LINKS, "tr")
+    rows = extract_cells_from_table_rows(HTML_WITH_LINKS, "tr", "Accounts")
     assert [(extract_cell_text(row[0]), extract_cell_href(row[0]), extract_cell_text(row[1])) for row in rows] == [
         ("ЛС: 123", "#777", "Address 1"),
         ("ЛС: 456", "#888", "Address 2"),

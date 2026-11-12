@@ -113,17 +113,19 @@ def html_to_str(
 def extract_cells_from_table_rows(
     html: str,
     tr_selector: str,
+    page_name: str,
 ) -> list[list[Tag]] | None:
     try:
         soup = BeautifulSoup(html, "html.parser")
         rows = soup.select(tr_selector)
         if not rows:
+            _LOGGER.warning("No %s table rows found (%s)", page_name.casefold(), tr_selector)
             return None
 
-        _LOGGER.debug("Soup rows: %s", rows)
+        _LOGGER.debug("Soup %s table rows (%s): %s", page_name.casefold(), tr_selector, rows)
         return [row.find_all(["td", "th"]) for row in rows]
     except Exception as e:
-        _LOGGER.error("Error extracting table rows: %s", e)
+        _LOGGER.error("Error extracting %s table rows (%s): %s", page_name.casefold(), tr_selector, e)
         return None
 
 

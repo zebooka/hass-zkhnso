@@ -262,6 +262,22 @@ def test_meter_uses_current_coordinator_data_and_clears_removed_meter() -> None:
     assert sensor.extra_state_attributes == {}
 
 
+@pytest.mark.parametrize("is_archived", [False, True])
+def test_meter_archive_default_and_icon_follow_coordinator(is_archived) -> None:
+    meter = {"name": "Вода", "serial_number": "1", "unit": "куб.м.", "value": 12.5,
+             "is_archived": is_archived}
+    coordinator = _coordinator({"meters": {"1": meter}})
+    sensor = ZKHMeterSensor(coordinator, "1", meter, "42")
+    assert sensor.unique_id == "entry_account_42_meter_1"
+    assert sensor.entity_registry_enabled_default is (not is_archived)
+    assert sensor.icon == ("mdi:archive" if is_archived else "mdi:counter")
+    assert sensor.native_value == 12.5
+
+    coordinator.data["accounts"]["42"]["meters"]["1"]["is_archived"] = not is_archived
+    assert sensor.icon == ("mdi:counter" if is_archived else "mdi:archive")
+    assert sensor.entity_registry_enabled_default is (not is_archived)
+
+
 def test_meter_device_classes() -> None:
     """Gas, electricity, heat, and generic volumes use correct device classes."""
     cases = [

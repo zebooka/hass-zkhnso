@@ -18,6 +18,7 @@ def _login_client(status=200, body='<div class="header"><div class="account"><sp
     client.form_token = "token"
     response = SimpleNamespace(
         status=status,
+        method="POST",
         headers=CIMultiDict(),
         url="https://example.test/login",
         text=AsyncMock(return_value=body, side_effect=error),
@@ -192,6 +193,7 @@ def test_process_meters_preserves_fractional_reading() -> None:
     )
 
     assert result["123"]["value"] == 12.34
+    assert result["123"]["is_archived"] is False
 
 
 def test_process_meters_supports_both_counter_row_formats() -> None:
@@ -227,6 +229,165 @@ def test_process_meters_supports_both_counter_row_formats() -> None:
 
     assert result["26_16185541"]["next_verification_date"] == "2028-06-02"
     assert result["22_157073"]["next_verification_date"] == "2028-06-02"
+
+
+def test_get_meters_parses_active_and_archived_tables() -> None:
+    client = ZKHAPIClient("user", "password")
+    active_html = '''
+        <form id="countersForm">
+          <table><tr><th>Active</th></tr>
+            <tr><td>Вода</td><td>22-123</td><td>куб.м.</td><td>01.01.2026</td><td>12,34</td><td>02.01.2030</td></tr>
+          </table>
+        </form>
+    '''
+    archived_html = '''
+        <form id="countersForm">
+          <table><tr><th>Active</th></tr></table>
+          <table><tr><th>Archived</th></tr>
+            <tr><td>Вода</td><td>22-456</td><td>куб.м.</td><td>02.02.2025</td><td>00193.000</td><td>03.03.2029</td></tr>
+          </table>
+        </form>
+    '''
+    client._get_page = AsyncMock(side_effect=[active_html, archived_html])
+    assert asyncio.run(client.get_meters()) == {
+        "22_123": {"name": "Вода", "serial_number": "22-123", "unit": "куб.м.",
+                   "date": "2026-01-01", "value": 12.34, "next_verification_date": "2030-01-02", "is_archived": False},
+    }
+    assert asyncio.run(client.get_archived_meters()) == {
+        "22_456": {"name": "Вода", "serial_number": "22-456", "unit": "куб.м.",
+                   "date": "2025-02-02", "value": 193.0, "next_verification_date": "2029-03-03", "is_archived": True},
+    }
+    assert client._get_page.await_args_list == [
+        (("https://xn--f1aijeow.xn--p1ai/room/lk/counters.action", "Meters"), {}),
+        (("https://xn--f1aijeow.xn--p1ai/room/lk/counters!mode.action?showOff=true", "Archived meters"), {}),
+    ]
+
+
+@pytest.fixture
+def portal_counters_form() -> str:
+    """Portal form with active input fields and archived verification tooltips."""
+    return '''
+    <form id="countersForm" action="/room/lk/counters.action" method="post">
+      <div class="white-block rc7-w-w">
+        <div class="tl"></div><div class="tr"></div><div class="br"></div><div class="bl"></div>
+        <h2>Счётчики</h2>
+        <table class="grid"><tbody>
+          <tr><th>Услуга</th><th>Серийный номер счётчика</th><th>Ед. изм.</th>
+              <th>Дата предыдущих показаний</th><th>Предыдущие показания</th>
+              <th>Текущие показания</th><th>Дата текущих показаний</th><th>Расход</th>
+              <th>Дата следующей поверки</th><th>История</th></tr>
+          <tr><td class="count-serv">гор.вода</td><td>22-157073</td><td class="count-measure">куб.м.</td>
+              <td>25.10.2026</td><td>172.000<span class="count-prev" style="display: none">00172.000</span></td>
+              <td><input name="counterValue[0]" value=""><span class="count-type" style="display: none">1</span></td>
+              <td><input name="counterDate[0]" value="12.11.2026"><button>...</button></td><td class="count-diff"></td>
+              <input type="hidden" name="counterCode[0]" value="146047636464:1">
+              <td>02.06.2028</td><td><a href="/room/lk/counterHistoryPopup.action?code=146047636464%3A1">История</a></td></tr>
+          <tr><td class="count-serv">хол.вода</td><td>22-171694</td><td class="count-measure">куб.м.</td>
+              <td>25.10.2026</td><td>532<span class="count-prev" style="display: none">00532</span></td>
+              <td><input name="counterValue[1]" value=""><span class="count-type" style="display: none">1</span></td>
+              <td><input name="counterDate[1]" value="12.11.2026"><button>...</button></td><td class="count-diff"></td>
+              <input type="hidden" name="counterCode[1]" value="145951290085:1">
+              <td>02.06.2028</td><td><a href="/room/lk/counterHistoryPopup.action?code=145951290085%3A1">История</a></td></tr>
+        </tbody></table>
+        <div class="left"><a href="javascript:;" onclick="hideOff()">Скрыть неактивные счётчики</a></div>
+        <div class="right"><a href="javascript:;" onclick="save(); return false">Сохранить показания счётчиков</a></div>
+        <div class="clear"></div><h2>Неактивные счётчики</h2>
+        <table class="grid"><tbody>
+          <tr><th>Услуга</th><th>Серийный номер счётчика</th><th>Ед. изм.</th>
+              <th>Дата предыдущих показаний</th><th>Предыдущие показания</th><th>Дата следующей поверки</th><th>История</th></tr>
+          <tr><td>гор.вода</td><td>1016061717404</td><td>куб.м.</td><td>05.10.2022</td><td>00193</td>
+              <td><span class="tip tip-simple" original-title="Поверка прибора закончилась">06.10.2022</span></td>
+              <td><a href="/room/lk/counterHistoryPopup.action?code=34493865929%3A1">История</a></td></tr>
+          <tr><td>гор.вода</td><td>1010122602500</td><td>куб.м.</td><td>01.02.2017</td><td>00326.000</td>
+              <td><span class="tip tip-simple" original-title="Поверка прибора закончилась">04.02.2017</span></td>
+              <td><a href="/room/lk/counterHistoryPopup.action?code=6729926580%3A1">История</a></td></tr>
+          <tr><td>хол.вода</td><td>1016061717404</td><td>куб.м.</td><td>04.10.2022</td><td>00681</td>
+              <td><span class="tip tip-simple" original-title="Поверка прибора закончилась">05.10.2022</span></td>
+              <td><a href="/room/lk/counterHistoryPopup.action?code=34493893562%3A1">История</a></td></tr>
+          <tr><td>хол.вода</td><td>1010122599404</td><td>куб.м.</td><td>01.02.2017</td><td>00377.000</td>
+              <td><span class="tip tip-simple" original-title="Поверка прибора закончилась">04.02.2017</span></td>
+              <td><a href="/room/lk/counterHistoryPopup.action?code=6729928201%3A1">История</a></td></tr>
+        </tbody></table><div class="clear"></div>
+      </div>
+    </form>
+    '''
+
+
+@pytest.fixture
+def portal_meters(portal_counters_form) -> dict:
+    from bs4 import BeautifulSoup
+
+    client = ZKHAPIClient("user", "password")
+    active_form = BeautifulSoup(portal_counters_form, "html.parser")
+    active_form.select("#countersForm table")[1].decompose()
+    client._get_page = AsyncMock(side_effect=[str(active_form), portal_counters_form])
+    async def fetch():
+        active = await client.get_meters()
+        archived = await client.get_archived_meters()
+        return {**active, **archived}
+    return asyncio.run(fetch())
+
+
+def test_get_meters_with_portal_form(portal_meters) -> None:
+    assert portal_meters == {
+        "22_157073": {"name": "гор.вода", "serial_number": "22-157073", "unit": "куб.м.",
+                      "date": "2026-10-25", "value": 172.0, "next_verification_date": "2028-06-02", "is_archived": False},
+        "22_171694": {"name": "хол.вода", "serial_number": "22-171694", "unit": "куб.м.",
+                      "date": "2026-10-25", "value": 532.0, "next_verification_date": "2028-06-02", "is_archived": False},
+        "1016061717404": {"name": "хол.вода", "serial_number": "1016061717404", "unit": "куб.м.",
+                          "date": "2022-10-04", "value": 681.0, "next_verification_date": "2022-10-05", "is_archived": True},
+        "1010122602500": {"name": "гор.вода", "serial_number": "1010122602500", "unit": "куб.м.",
+                          "date": "2017-02-01", "value": 326.0, "next_verification_date": "2017-02-04", "is_archived": True},
+        "1010122599404": {"name": "хол.вода", "serial_number": "1010122599404", "unit": "куб.м.",
+                          "date": "2017-02-01", "value": 377.0, "next_verification_date": "2017-02-04", "is_archived": True},
+    }
+
+
+@pytest.mark.xfail(strict=True, reason="Счётчики с одинаковым серийным номером перезаписывают друг друга")
+def test_get_meters_preserves_archived_meters_with_duplicate_serial(portal_meters) -> None:
+    duplicates = [meter for meter in portal_meters.values() if meter["serial_number"] == "1016061717404"]
+    assert {(meter["name"], meter["value"], meter["date"], meter["next_verification_date"]) for meter in duplicates} == {
+        ("гор.вода", 193.0, "2022-10-05", "2022-10-06"),
+        ("хол.вода", 681.0, "2022-10-04", "2022-10-05"),
+    }
+
+
+@pytest.mark.parametrize("html,expected", [
+    (None, None),
+    ("", None),
+    ('<form id="countersForm"><table><tr><th>Active</th></tr></table></form>', {}),
+    ('<form id="countersForm"></form>', {}),
+])
+def test_get_meters_handles_missing_or_empty_tables(html, expected) -> None:
+    client = ZKHAPIClient("user", "password")
+    client._get_page = AsyncMock(return_value=html)
+    assert asyncio.run(client.get_meters()) == expected
+
+
+@pytest.mark.parametrize("html,expected", [
+    (None, None),
+    ("", None),
+    ('<form id="countersForm"><table><tr><th>Active</th></tr></table></form>', {}),
+    ('<form id="countersForm"><table><tr><th>Active</th></tr></table>'
+     '<table><tr><th>Archive</th></tr><tr><td>Water</td><td>1</td><td>м³</td>'
+     '<td>01.01.2026</td><td>10</td><td>01.01.2030</td></tr></table></form>',
+     {"1": {"name": "Water", "serial_number": "1", "unit": "м³", "date": "2026-01-01",
+            "value": 10.0, "next_verification_date": "2030-01-01", "is_archived": True}}),
+])
+def test_get_archived_meters_handles_missing_or_empty_tables(html, expected) -> None:
+    client = ZKHAPIClient("user", "password")
+    client._get_page = AsyncMock(return_value=html)
+    assert asyncio.run(client.get_archived_meters()) == expected
+
+
+def test_process_archive_meters_skips_incomplete_rows() -> None:
+    client = ZKHAPIClient("user", "password")
+    assert client._process_archive_meters_data([]) == {}
+    result = client._process_archive_meters_data([
+        ["header"], ["incomplete"], ["Water", "42", "м³", "01.01.2026", "1", "02.01.2030"]
+    ])
+    assert list(result) == ["42"]
+    assert result["42"]["is_archived"] is True
 
 
 def test_session_cookie_jar_handles_login_rotation_and_client_isolation(monkeypatch) -> None:
@@ -326,6 +487,7 @@ def test_api_client_parsing_helpers() -> None:
     client = ZKHAPIClient("user", "password")
 
     assert client._parse_float("1\u00a0234,56") == 1234.56
+    assert client._parse_float("00193.000") == 193
     assert client._parse_float("") is None
     assert client._parse_float("invalid") is None
     assert client._parse_date("31.12.2026") == "2026-12-31"

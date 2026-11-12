@@ -47,6 +47,9 @@ class _Client:
     async def get_meters(self):
         return {"serial": {"value": int(self.current_account_id)}}
 
+    async def get_archived_meters(self):
+        return {"archived": {"value": int(self.current_account_id), "is_archived": True}}
+
     async def get_tariffs(self):
         return {"Water": {"rate_per_unit": int(self.current_account_id)}}
 
@@ -100,6 +103,14 @@ def test_http_session_fetches_distinct_accounts_and_creates_sensors(monkeypatch)
                    '<tr><td>Газ</td><td>222</td><td>куб.м.</td><td>01.01.2026</td><td>30</td><td>01.01.2030</td></tr>')
             return web.Response(text=f'<form id="countersForm"><table><tr><th>Счётчик</th></tr>{row}</table></form>')
 
+        async def archived_counters(request):
+            assert request.cookies.get("JSESSIONID") == "session"
+            assert request.query["showOff"] == "true"
+            requests.append(("archived_meters", current))
+            serial = "333" if current == "42" else "444"
+            row = f'<tr><td>Вода</td><td>{serial}</td><td>куб.м.</td><td>01.01.2025</td><td>50</td><td>01.01.2030</td></tr>'
+            return web.Response(text=f'<form id="countersForm"><table><tr><th>Активные</th></tr></table><table><tr><th>Архив</th></tr>{row}</table></form>')
+
         async def tariffs(request):
             assert request.cookies.get("JSESSIONID") == "session"
             requests.append(("tariffs", current))
@@ -114,6 +125,7 @@ def test_http_session_fetches_distinct_accounts_and_creates_sensors(monkeypatch)
         app.router.add_get('/room/lk/main!change.action', switch)
         app.router.add_get('/room/lk/main.action', address_info)
         app.router.add_get('/room/lk/counters.action', counters)
+        app.router.add_get('/room/lk/counters!mode.action', archived_counters)
         app.router.add_get('/room/lk/tariffs.action', tariffs)
         runner = web.AppRunner(app)
         await runner.setup()
@@ -132,17 +144,21 @@ def test_http_session_fetches_distinct_accounts_and_creates_sensors(monkeypatch)
             entities = added.call_args.args[0]
             meters = {(e._account_id, e._meter_key): e.native_value for e in entities if isinstance(e, ZKHMeterSensor)}
             tariffs_by_account = {(e._account_id, e._tariff_key): e.native_value for e in entities if isinstance(e, ZKHTariffSensor)}
-            assert meters == {('42', '111'): 10, ('43', '222'): 30}
+            assert all(not e.entity_registry_enabled_default and e.icon == "mdi:archive"
+                       for e in entities if isinstance(e, ZKHMeterSensor) and e._meter_key in ("333", "444"))
             assert tariffs_by_account == {('42', 'ВОДА'): 20, ('43', 'ГАЗ'): 40}
             assert requests == [
                 ('address', '42'),
                 ('meters', '42'),
+                ('archived_meters', '42'),
                 ('tariffs', '42'),
                 ('switch', '43'),
                 ('address', '43'),
                 ('meters', '43'),
+                ('archived_meters', '43'),
                 ('tariffs', '43')
             ]
+            assert meters == {('42', '111'): 10, ('42', '333'): 50, ('43', '222'): 30, ('43', '444'): 50}
         finally:
             await runner.cleanup()
 
@@ -165,7 +181,7 @@ def test_coordinator_returns_meter_and_tariff_containers(monkeypatch) -> None:
                 "address": "Адрес 42",
                 "company_name": "УК 42",
                 "company_address": "Адрес 42/1",
-                "meters": {"serial": {"value": 42}},
+                "meters": {"serial": {"value": 42}, "archived": {"value": 42, "is_archived": True}},
                 "tariffs": {"Water": {"rate_per_unit": 42}}
             },
             "43": {
@@ -173,7 +189,7 @@ def test_coordinator_returns_meter_and_tariff_containers(monkeypatch) -> None:
                 "address": "Адрес 43",
                 "company_name": "УК 43",
                 "company_address": "Адрес 43/1",
-                "meters": {"serial": {"value": 43}},
+                "meters": {"serial": {"value": 43}, "archived": {"value": 43, "is_archived": True}},
                 "tariffs": {"Water": {"rate_per_unit": 43}}
             },
         },
@@ -202,6 +218,10 @@ def test_accounts_are_processed_sequentially_on_initial_and_repeated_refresh(mon
                 await asyncio.sleep(0)
                 return await super().get_meters()
 
+            async def get_archived_meters(self):
+                events.append(("archived_meters", self.current_account_id))
+                return await super().get_archived_meters()
+
             async def get_tariffs(self):
                 account_id = self.current_account_id
                 events.append(("tariffs_start", account_id))
@@ -224,7 +244,7 @@ def test_accounts_are_processed_sequentially_on_initial_and_repeated_refresh(mon
             try:
                 await asyncio.wait_for(tariff_started.wait(), timeout=2)
                 await asyncio.sleep(0)
-                assert events == [("meters", "42"), ("tariffs_start", "42")]
+                assert events == [("meters", "42"), ("archived_meters", "42"), ("tariffs_start", "42")]
                 release_tariff.set()
                 result = await asyncio.wait_for(update, timeout=2)
             finally:
@@ -233,13 +253,14 @@ def test_accounts_are_processed_sequentially_on_initial_and_repeated_refresh(mon
                     await asyncio.gather(update, return_exceptions=True)
 
             assert events == [
-                ("meters", "42"), ("tariffs_start", "42"), ("tariffs_end", "42"),
-                ("switch", "43"), ("meters", "43"), ("tariffs_start", "43"), ("tariffs_end", "43"),
-                ("switch", "44"), ("meters", "44"), ("tariffs_start", "44"), ("tariffs_end", "44"),
+                ("meters", "42"), ("archived_meters", "42"), ("tariffs_start", "42"), ("tariffs_end", "42"),
+                ("switch", "43"), ("meters", "43"), ("archived_meters", "43"), ("tariffs_start", "43"), ("tariffs_end", "43"),
+                ("switch", "44"), ("meters", "44"), ("archived_meters", "44"), ("tariffs_start", "44"), ("tariffs_end", "44"),
             ]
             for account_id in ("42", "43", "44"):
                 account = result["accounts"][account_id]
                 assert account["meters"]["serial"]["value"] == int(account_id)
+                assert account["meters"]["archived"]["value"] == int(account_id)
                 assert account["tariffs"]["Water"]["rate_per_unit"] == int(account_id)
 
     asyncio.run(run())
@@ -270,22 +291,49 @@ def test_coordinator_uses_current_account_before_switching(monkeypatch) -> None:
     data = asyncio.run(coordinator._async_update_data())
     assert data["accounts"]["43"]["meters"]["serial"]["value"] == 43
     assert data["accounts"]["42"]["meters"]["serial"]["value"] == 42
+    assert data["accounts"]["43"]["meters"]["archived"]["value"] == 43
+    assert data["accounts"]["42"]["meters"]["archived"]["value"] == 42
     assert client.switched == ["43"]
 
 
-@pytest.mark.parametrize("failed_method", ["get_meters", "get_tariffs"])
+@pytest.mark.parametrize("failed_method", ["get_tariffs", "both_meters"])
 def test_coordinator_rejects_partial_account_data(monkeypatch, failed_method) -> None:
     import custom_components.zkhnso.coordinator as coordinator_module
 
     client = _Client()
     async def fetch():
         return None if client.current_account_id == "43" else {}
-    setattr(client, failed_method, fetch)
+    if failed_method == "both_meters":
+        client.get_meters = fetch
+        client.get_archived_meters = fetch
+    else:
+        setattr(client, failed_method, fetch)
     monkeypatch.setattr(coordinator_module, "ZKHAPIClient", lambda *_: client)
     coordinator = object.__new__(ZKHDataUpdateCoordinator)
     coordinator.entry = SimpleNamespace(data={"username": "user", "password": "pass"})
     with pytest.raises(UpdateFailed):
         asyncio.run(coordinator._async_update_data())
+
+
+@pytest.mark.parametrize(
+    ("failed_method", "remaining_key"),
+    [("get_meters", "archived"), ("get_archived_meters", "serial")],
+)
+def test_coordinator_keeps_meters_when_one_request_fails(monkeypatch, failed_method, remaining_key) -> None:
+    import custom_components.zkhnso.coordinator as coordinator_module
+
+    client = _Client()
+    async def failed():
+        return None
+    setattr(client, failed_method, failed)
+    monkeypatch.setattr(coordinator_module, "ZKHAPIClient", lambda *_: client)
+    coordinator = object.__new__(ZKHDataUpdateCoordinator)
+    coordinator.entry = SimpleNamespace(data={"username": "user", "password": "pass"})
+    data = asyncio.run(coordinator._async_update_data())
+    for account_id in ("42", "43"):
+        meters = data["accounts"][account_id]["meters"]
+        assert set(meters) == {remaining_key}
+        assert meters[remaining_key]["value"] == int(account_id)
 
 
 @pytest.mark.parametrize(

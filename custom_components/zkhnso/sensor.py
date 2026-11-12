@@ -153,7 +153,7 @@ class ZKHMeterSensor(ZKHSensor):
             "name": str(meter.get("name", key)),
             "serial_number": str(meter.get("serial_number")),
         }
-        self._attr_icon = "mdi:counter"
+        self._attr_entity_registry_enabled_default = not meter.get("is_archived", False)
         self._attr_state_class = SensorStateClass.TOTAL
 
         meter_name_lower = str(meter.get("name")).casefold()
@@ -177,6 +177,10 @@ class ZKHMeterSensor(ZKHSensor):
     def _meter(self) -> dict | None:
         account = self._account
         return account.get("meters", {}).get(self._meter_key) or None if isinstance(account, dict) else None
+
+    @property
+    def icon(self) -> str:
+        return "mdi:card-remove-outline" if (self._meter or {}).get("is_archived", False) else "mdi:counter"
 
     @property
     def native_value(self) -> float | None:

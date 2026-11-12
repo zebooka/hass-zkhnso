@@ -17,6 +17,7 @@ from .const import (
     API_URL_LOGIN,
     API_URL_MAIN,
     API_URL_METERS,
+    API_URL_ARCHIVED_METERS,
     API_URL_TARIFFS,
     API_URL_PREFLIGHT,
     SESSION_FORM_TOKEN,
@@ -179,7 +180,7 @@ class ZKHAPIClient:
 
                     self.accounts = {self.current_account_id: None}
 
-                    rows = extract_cells_from_table_rows(html, ".header .account .acc-select .accounts-grid tr") or []
+                    rows = extract_cells_from_table_rows(html, ".header .account .acc-select .accounts-grid tr", "Accounts") or []
                     for row in rows:
                         if len(row) < 2:
                             continue
@@ -279,7 +280,7 @@ class ZKHAPIClient:
         if not html:
             return None
 
-        rows = extract_cells_from_table_rows(html, selector)
+        rows = extract_cells_from_table_rows(html, selector, page_name)
         if not rows:
             _LOGGER.warning("No %s table rows found at %s", page_name.casefold(), url)
             return []
@@ -287,10 +288,16 @@ class ZKHAPIClient:
         return [[extract_cell_text(cell) for cell in row] for row in rows]
 
     async def get_meters(self) -> dict[str, Any] | None:
-        """Fetch meters/counters data."""
+        """Fetch meters data."""
         url = urljoin(API_BASE_URL, API_URL_METERS)
         rows = await self._get_data(url, "#countersForm table tr", "Meters")
         return self._process_meters_data(rows) if rows is not None else None
+
+    async def get_archived_meters(self) -> dict[str, Any] | None:
+        """Fetch archive meters data."""
+        url = urljoin(API_BASE_URL, API_URL_ARCHIVED_METERS)
+        rows = await self._get_data(url, "#countersForm table:nth-of-type(2) tr", "Archived meters")
+        return self._process_archive_meters_data(rows) if rows is not None else None
 
     async def get_tariffs(self) -> dict[str, Any] | None:
         """Fetch tariffs data."""
@@ -340,18 +347,51 @@ class ZKHAPIClient:
                     "name": row[0].strip(),
                     "serial_number": row[1].strip(),
                     "unit": row[2].strip(),
-                    "value": self._parse_float(row[4].strip()),
                     "date": self._parse_date(row[3].strip()),
-                    "next_verification_date": self._parse_date(
-                        row[8].strip() if len(row) >= 9 else row[5].strip()
-                    ),
+                    "value": self._parse_float(row[4].strip()),
+                    "next_verification_date": self._parse_date(row[5].strip() if len(row) < 9 else row[8].strip()),
+                    "is_archived": False,
                 }
 
                 _LOGGER.debug("Meter %s: %s", key, meter)
                 meters[key] = meter
 
             except (IndexError, AttributeError) as e:
-                _LOGGER.warning("Error processing row %s: %s", row, e)
+                _LOGGER.warning("Error processing meter row %s: %s", row, e)
+                continue
+
+        return meters
+
+    def _process_archive_meters_data(self, rows: list[list[str]]) -> dict[str, Any]:
+        """Process table rows into archive meters data structure."""
+        if not rows or len(rows) < 2:
+            return {}
+
+        meters = {}
+
+        for row in rows[1:]:
+            _LOGGER.debug("Row: %s", row)
+            if len(row) < 6:
+                _LOGGER.warning("Row has insufficient columns: %s", row)
+                continue
+
+            try:
+                key = self._sanitize_serial_number(row[1].strip())
+                meter = {
+                    "name": row[0].strip(),
+                    "serial_number": row[1].strip(),
+                    "unit": row[2].strip(),
+                    "date": self._parse_date(row[3].strip()),
+                    "value": self._parse_float(row[4].strip()),
+                    "next_verification_date": self._parse_date(row[5].strip()),
+                    "is_archived": True,
+                }
+
+                _LOGGER.debug("Archive meter %s: %s", key, meter)
+                meters[key] = meter
+
+            except (IndexError, AttributeError) as e:
+                _LOGGER.warning("Error processing archive meter row %s: %s", row, e)
                 continue
 
         return meters
