@@ -276,11 +276,11 @@ def test_meter_archive_default_and_icon_follow_coordinator(is_archived) -> None:
     sensor = ZKHMeterSensor(coordinator, "1", meter, "42")
     assert sensor.unique_id == "entry_account_42_meter_1"
     assert sensor.entity_registry_enabled_default is (not is_archived)
-    assert sensor.icon == ("mdi:archive" if is_archived else "mdi:counter")
+    assert sensor.icon == ("mdi:card-remove-outline" if is_archived else "mdi:counter")
     assert sensor.native_value == 12.5
 
     coordinator.data["accounts"]["42"]["meters"]["1"]["is_archived"] = not is_archived
-    assert sensor.icon == ("mdi:counter" if is_archived else "mdi:archive")
+    assert sensor.icon == ("mdi:counter" if is_archived else "mdi:card-remove-outline")
     assert sensor.entity_registry_enabled_default is (not is_archived)
 
 

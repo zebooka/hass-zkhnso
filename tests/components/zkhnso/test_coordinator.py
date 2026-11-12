@@ -143,7 +143,7 @@ def test_http_session_fetches_distinct_accounts_and_creates_sensors(monkeypatch)
             entities = added.call_args.args[0]
             meters = {(e._account_id, e._meter_key): e.native_value for e in entities if isinstance(e, ZKHMeterSensor)}
             tariffs_by_account = {(e._account_id, e._tariff_key): e.native_value for e in entities if isinstance(e, ZKHTariffSensor)}
-            assert all(not e.entity_registry_enabled_default and e.icon == "mdi:archive"
+            assert all(not e.entity_registry_enabled_default and e.icon == "mdi:card-remove-outline"
                        for e in entities if isinstance(e, ZKHMeterSensor) and e._meter_key in ("333", "444"))
             assert tariffs_by_account == {('42', 'ВОДА'): 20, ('43', 'ГАЗ'): 40}
             assert requests == [
