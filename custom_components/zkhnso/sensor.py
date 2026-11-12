@@ -133,6 +133,7 @@ class ZKHCompanySensor(ZKHSensor):
             return {}
 
         return {
+            "name": self.name if self.platform else self._attr_translation_key,
             "address": account.get("company_address"),
         }
 
@@ -189,7 +190,8 @@ class ZKHMeterSensor(ZKHSensor):
             return {}
 
         return {
-            "name": meter.get("name"),
+            "name": self.name if self.platform else self._attr_translation_placeholders["name"],
+            "meter_name": meter.get("name"),
             "serial_number": meter.get("serial_number"),
             "unit": meter.get("unit"),
             "date": meter.get("date"),
