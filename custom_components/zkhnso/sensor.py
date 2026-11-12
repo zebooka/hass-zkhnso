@@ -145,7 +145,7 @@ class ZKHMeterSensor(ZKHSensor):
         account_id: str,
     ) -> None:
         super().__init__(coordinator, account_id)
-        self.key = key
+        self._meter_key = key
         self._attr_unique_id = f"{self._id_prefix}_meter_{key}"
         self._attr_translation_key = "meter"
         self._attr_translation_placeholders = {
@@ -175,7 +175,7 @@ class ZKHMeterSensor(ZKHSensor):
     @property
     def _meter(self) -> dict | None:
         account = self._account
-        return account.get("meters", {}).get(self.key) or None if isinstance(account, dict) else None
+        return account.get("meters", {}).get(self._meter_key) or None if isinstance(account, dict) else None
 
     @property
     def native_value(self) -> float | None:
@@ -206,7 +206,7 @@ class ZKHTariffSensor(ZKHSensor):
         account_id: str
     ) -> None:
         super().__init__(coordinator, account_id)
-        self.key = key
+        self._tariff_key = key
         self._attr_unique_id = f"{self._id_prefix}_tariff_{key}"
         self._attr_translation_key = "tariff"
         self._attr_translation_placeholders = {
@@ -218,7 +218,7 @@ class ZKHTariffSensor(ZKHSensor):
     @property
     def _tariff(self) -> dict | None:
         account = self._account
-        return account.get("tariffs", {}).get(self.key) or None if isinstance(account, dict) else None
+        return account.get("tariffs", {}).get(self._tariff_key) or None if isinstance(account, dict) else None
 
     @property
     def native_value(self) -> float | None:
@@ -258,11 +258,11 @@ class ZKHCombinedTariffSensor(ZKHSensor):
         account_id: str
     ) -> None:
         super().__init__(coordinator, account_id)
-        self.name = str(name)
+        self._tariff_name = str(name)
         self._attr_unique_id = f"{self._id_prefix}_combined_tariff_{name}"
         self._attr_translation_key = "combined_tariff"
         self._attr_translation_placeholders = {
-            "name": self.name,
+            "name": self._tariff_name,
         }
         self._attr_native_unit_of_measurement = f"RUB/{UnitOfVolume.CUBIC_METERS}"
         self._attr_icon = "mdi:sigma"
@@ -307,11 +307,15 @@ class ZKHCombinedTariffFormulaSensor(ZKHSensor):
         super().__init__(tariff_sensor.coordinator, tariff_sensor._account_id)
         self._tariff_sensor = tariff_sensor
         self._attr_unique_id = f"{tariff_sensor.unique_id}_formula"
-        self._attr_translation_placeholders = {"name": tariff_sensor.name}
+        self._attr_translation_placeholders = {"name": tariff_sensor._tariff_name}
 
     @property
     def native_value(self) -> str | None:
         return self._tariff_sensor.extra_state_attributes.get("formula")
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {"name": self.name if self.platform else self._attr_translation_placeholders["name"]}
 
 
 class ZKHCombinedColdWaterTariffSensor(ZKHCombinedTariffSensor):
@@ -344,7 +348,7 @@ class ZKHCombinedColdWaterTariffSensor(ZKHCombinedTariffSensor):
         dates = [waste_water.get("from_date"), cold_water.get("from_date")]
 
         return {
-            "name": self.name,
+            "name": self.name if self.platform else self._tariff_name,
             "names": [waste_water.get("name"), cold_water.get("name")],
             "formula": f"{waste_water.get('name')} + {cold_water.get('name')}",
             "from_date": max((date for date in dates if date is not None), default=None),
@@ -409,7 +413,7 @@ class ZKHCombinedHotWaterTariffSensor(ZKHCombinedTariffSensor):
         if hot_water is not None:
             dates.append(hot_water.get("from_date"))
             return {
-                "name": self.name,
+                "name": self.name if self.platform else self._tariff_name,
                 "names": [waste_water.get("name"), hot_water.get("name")],
                 "formula": f"{waste_water.get('name')} + {hot_water.get('name')}",
                 "from_date": max((date for date in dates if date is not None), default=None),
@@ -424,7 +428,7 @@ class ZKHCombinedHotWaterTariffSensor(ZKHCombinedTariffSensor):
             dates.append(hot_water_fluid.get("from_date"))
             dates.append(hot_water_heating.get("from_date"))
             return {
-                "name": self.name,
+                "name": self.name if self.platform else self._tariff_name,
                 "names": [waste_water.get("name"), hot_water_fluid.get("name"), hot_water_heating.get("name")],
                 "formula": f"{waste_water.get('name')} + {hot_water_fluid.get('name')} + {hot_water_heating.get('name')} × {self._water_heating_rate}",
                 "from_date": max((date for date in dates if date is not None), default=None),

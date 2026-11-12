@@ -130,8 +130,8 @@ def test_http_session_fetches_distinct_accounts_and_creates_sensors(monkeypatch)
             monkeypatch.setattr("custom_components.zkhnso.sensor.async_get_device_registry", lambda _: SimpleNamespace(async_get_device=lambda **_: None))
             await async_setup_entry(None, SimpleNamespace(entry_id="entry", runtime_data=coordinator, options={}, async_on_unload=MagicMock()), added)
             entities = added.call_args.args[0]
-            meters = {(e._account_id, e.key): e.native_value for e in entities if isinstance(e, ZKHMeterSensor)}
-            tariffs_by_account = {(e._account_id, e.key): e.native_value for e in entities if isinstance(e, ZKHTariffSensor)}
+            meters = {(e._account_id, e._meter_key): e.native_value for e in entities if isinstance(e, ZKHMeterSensor)}
+            tariffs_by_account = {(e._account_id, e._tariff_key): e.native_value for e in entities if isinstance(e, ZKHTariffSensor)}
             assert meters == {('42', '111'): 10, ('43', '222'): 30}
             assert tariffs_by_account == {('42', 'ВОДА'): 20, ('43', 'ГАЗ'): 40}
             assert requests == [

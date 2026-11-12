@@ -478,7 +478,7 @@ def test_combined_tariff_formula_diagnostics_update_and_handle_missing_data() ->
     assert hot_formula.unique_id == f"{hot.unique_id}_formula"
     assert cold_formula.device_info == cold.device_info
     assert cold_formula.translation_key == "combined_tariff_formula"
-    assert cold_formula.translation_placeholders == {"name": cold.name}
+    assert cold_formula.translation_placeholders == {"name": "ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ"}
     assert cold_formula.native_unit_of_measurement is None
     assert cold_formula.native_value == "ВОДООТВЕДЕНИЕ + ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ"
     assert hot_formula.native_value == "ВОДООТВЕДЕНИЕ + ГОРЯЧЕЕ ВОДОСНАБЖЕНИЕ"

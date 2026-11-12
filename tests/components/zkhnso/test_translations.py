@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from custom_components.zkhnso import config_flow
-from custom_components.zkhnso.sensor import ZKHMeterSensor, ZKHTariffSensor, ZKHCombinedColdWaterTariffSensor, ZKHCombinedTariffFormulaSensor
+from custom_components.zkhnso.sensor import ZKHMeterSensor, ZKHTariffSensor, ZKHCombinedColdWaterTariffSensor, ZKHCombinedHotWaterTariffSensor, ZKHCombinedTariffFormulaSensor
 from homeassistant.util import slugify
 
 
@@ -85,10 +85,40 @@ def test_sensor_names_and_object_ids_use_entity_translations(language) -> None:
             component_translations={}, object_id_component_translations={})
         if hasattr(entity, "platform_data"):
             entity.platform_data = entity.platform
-        if entity is combined:
-            assert entity.name == "ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ"
-        else:
-            assert entity.name == platform_translations(language)[f"component.zkhnso.entity.sensor.{entity.translation_key}.name"].format(**entity.translation_placeholders)
+        assert entity.name == platform_translations(language)[f"component.zkhnso.entity.sensor.{entity.translation_key}.name"].format(**entity.translation_placeholders)
     assert slugify(f"{meter.device_info['name']} {meter.suggested_object_id}") == "no43_adres_2_meter_gaz_no222"
     assert slugify(f"{tariff.device_info['name']} {tariff.suggested_object_id}") == "no43_adres_2_tariff_gaz"
     assert slugify(f"{combined.device_info['name']} {combined.suggested_object_id}") == "no43_adres_2_combined_tariff_kholodnoe_vodosnabzhenie"
+
+
+@pytest.mark.parametrize("language", ["en", "ru"])
+@pytest.mark.parametrize("hot_type", ["direct", "heating"])
+def test_combined_tariff_attribute_names_are_translated(language, hot_type) -> None:
+    translations_dir = Path(config_flow.__file__).parent / "translations"
+    def platform_translations(lang):
+        translations = json.loads((translations_dir / f"{lang}.json").read_text(encoding="utf-8"))
+        return {f"component.zkhnso.entity.sensor.{key}.name": value["name"]
+                for key, value in translations["entity"]["sensor"].items()}
+
+    tariffs = {
+        "waste": {"name": "ВОДООТВЕДЕНИЕ", "unit": "м³", "rate_per_unit": 5},
+        "cold": {"name": "ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ", "unit": "м³", "rate_per_unit": 10},
+        "hot": {"name": "ГОРЯЧЕЕ ВОДОСНАБЖЕНИЕ", "unit": "м³", "rate_per_unit": 50},
+        "heat": {"name": "ОТОПЛЕНИЕ", "unit": "Гкал", "rate_per_unit": 1000},
+    }
+    options = {"waste_water_tariff": "ВОДООТВЕДЕНИЕ", "cold_water_tariff": "ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ",
+               "hot_water_tariff": "ГОРЯЧЕЕ ВОДОСНАБЖЕНИЕ" if hot_type == "direct" else "ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ",
+               "hot_water_heating_tariff": "ОТОПЛЕНИЕ"}
+    coordinator = SimpleNamespace(entry=SimpleNamespace(entry_id="entry", options={"account_options": {"43": options}}),
+                                  data={"accounts": {"43": {"tariffs": tariffs}}})
+    cold = ZKHCombinedColdWaterTariffSensor(coordinator, "43")
+    hot = ZKHCombinedHotWaterTariffSensor(coordinator, 0.05, "43")
+    for entity in (cold, hot, ZKHCombinedTariffFormulaSensor(cold), ZKHCombinedTariffFormulaSensor(hot)):
+        entity.platform = SimpleNamespace(platform_name="zkhnso", domain="sensor",
+            platform_translations=platform_translations(language), object_id_platform_translations=platform_translations("en"),
+            component_translations={}, object_id_component_translations={})
+        if hasattr(entity, "platform_data"):
+            entity.platform_data = entity.platform
+        expected = platform_translations(language)[f"component.zkhnso.entity.sensor.{entity.translation_key}.name"].format(**entity.translation_placeholders)
+        assert entity.extra_state_attributes["name"] == expected
+        assert entity.name == expected
