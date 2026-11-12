@@ -47,7 +47,7 @@ async def async_setup_entry(
             device = device_registry.async_get_device(
                 identifiers={(DOMAIN, f"{entry.entry_id}_account_{account_id}")}
             )
-            company = account.get("company_name")
+            company = account.get("company", {}).get("name")
             if device is not None and company is not None and device.manufacturer != company:
                 device_registry.async_update_device(device.id, manufacturer=company)
 
@@ -106,7 +106,7 @@ class ZKHSensor(CoordinatorEntity, SensorEntity):
         return DeviceInfo(
             identifiers={(DOMAIN, self._id_prefix)},
             name=f"№{self._account_id} {(self._account or {}).get('address', '')}".strip(),
-            manufacturer=(self._account or {}).get('company_name'),
+            manufacturer=(self._account or {}).get('company', {}).get("name"),
             entry_type=DeviceEntryType.SERVICE,
         )
 
@@ -124,7 +124,7 @@ class ZKHCompanySensor(ZKHSensor):
 
     @property
     def native_value(self) -> str | None:
-        return (self._account or {}).get("company_name")
+        return (self._account or {}).get("company", {}).get("name")
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -134,7 +134,7 @@ class ZKHCompanySensor(ZKHSensor):
 
         return {
             "name": self.name if self.platform else self._attr_translation_key,
-            "address": account.get("company_address"),
+            "address": account.get("company", {}).get("address"),
         }
 
 class ZKHMeterSensor(ZKHSensor):

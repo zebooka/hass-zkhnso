@@ -137,8 +137,7 @@ def test_get_info_extracts_account_and_company_details() -> None:
 
     assert asyncio.run(client.get_address_info()) == {
         "address": "Новосибирск, ул. Ленина",
-        "company_name": "Управляющая компания",
-        "company_address": "Офис, дом 1",
+        "company": {"name": "Управляющая компания", "address": "Офис, дом 1"},
     }
     client._get_page.assert_awaited_once_with(
         "https://xn--f1aijeow.xn--p1ai/room/lk/main.action", "Address info"
@@ -155,10 +154,10 @@ def test_get_info_returns_none_when_page_unavailable(html) -> None:
 
 @pytest.mark.parametrize(("html", "expected"), [
     ("<html><body>Empty page</body></html>",
-     {"address": None, "company_name": None, "company_address": None}),
+     {"address": None, "company": {"name": None, "address": None}}),
     ("<div class='header'><div class='address'> Address </div></div>"
      "<div class='main-content'><div class='contacts'><h2> </h2></div></div>",
-     {"address": "Address", "company_name": None, "company_address": None}),
+     {"address": "Address", "company": {"name": None, "address": None}}),
 ])
 def test_get_info_missing_or_empty_fields(html, expected) -> None:
     client = ZKHAPIClient("user", "password")

@@ -100,7 +100,7 @@ def test_meter_and_company_attribute_names_are_translated(language) -> None:
                 for key, value in translations["entity"]["sensor"].items()}
 
     meter_data = {"name": "Газ", "serial_number": "222", "unit": "куб.м.", "value": 5}
-    account = {"meters": {"222": meter_data}, "company_name": "УК", "company_address": "Адрес УК"}
+    account = {"meters": {"222": meter_data}, "company": {"name": "УК", "address": "Адрес УК"}}
     coordinator = SimpleNamespace(entry=SimpleNamespace(entry_id="entry"), data={"accounts": {"43": account}})
     meter = ZKHMeterSensor(coordinator, "222", meter_data, "43")
     company = ZKHCompanySensor(coordinator, "43")

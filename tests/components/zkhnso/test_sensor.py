@@ -136,7 +136,7 @@ def test_multiple_accounts_are_isolated_and_new_accounts_are_discovered(device_r
 
 
 def test_company_sensor_and_device_manufacturer_update_without_duplicates(device_registry) -> None:
-    coordinator = _coordinator({"company_name": "Первая УК"})
+    coordinator = _coordinator({"company": {"name": "Первая УК"}})
     listeners = []
     coordinator.async_add_listener = lambda callback: listeners.append(callback) or (lambda: None)
     device = SimpleNamespace(id="device-42", manufacturer="Первая УК")
@@ -148,7 +148,7 @@ def test_company_sensor_and_device_manufacturer_update_without_duplicates(device
     assert company.native_value == "Первая УК"
     device_registry.async_update_device.assert_not_called()
 
-    coordinator.data["accounts"]["42"]["company_name"] = "Новая УК"
+    coordinator.data["accounts"]["42"]["company"]["name"] = "Новая УК"
     listeners[0]()
     assert company.native_value == "Новая УК"
     device_registry.async_get_device.assert_called_with(identifiers={("zkhnso", "entry_account_42")})
@@ -156,6 +156,12 @@ def test_company_sensor_and_device_manufacturer_update_without_duplicates(device
     added.assert_called_once()
     coordinator.data = None
     assert company.native_value is None
+
+
+def test_device_info_manufacturer_uses_company_name() -> None:
+    coordinator = _coordinator({"company": {"name": "Первая УК"}})
+    company = ZKHCompanySensor(coordinator, "42")
+    assert company.device_info["manufacturer"] == "Первая УК"
 
 
 def test_combined_tariffs_use_only_their_own_account() -> None:

@@ -270,8 +270,10 @@ class ZKHAPIClient:
 
         return {
             "address": html_to_str(html, ".header .address"),
-            "company_name": html_to_str(html, ".main-content .contacts h2"),
-            "company_address": html_to_str(html, ".main-content .contacts div.text"),
+            "company": {
+                "name": html_to_str(html, ".main-content .contacts h2"),
+                "address": html_to_str(html, ".main-content .contacts div.text"),
+            },
         }
 
     async def _get_data(self, url: str, selector: str, page_name: str) -> list[list[str]] | None:

@@ -40,8 +40,7 @@ class _Client:
     async def get_address_info(self):
         return {
             "address": f"Адрес {self.current_account_id}",
-            "company_name": f"УК {self.current_account_id}",
-            "company_address": f"Адрес {self.current_account_id}/1"
+            "company": {"name": f"УК {self.current_account_id}", "address": f"Адрес {self.current_account_id}/1"},
         }
 
     async def get_meters(self):
@@ -179,16 +178,14 @@ def test_coordinator_returns_meter_and_tariff_containers(monkeypatch) -> None:
             "42": {
                 "account_id": "42",
                 "address": "Адрес 42",
-                "company_name": "УК 42",
-                "company_address": "Адрес 42/1",
+                "company": {"name": "УК 42", "address": "Адрес 42/1"},
                 "meters": {"serial": {"value": 42}, "archived": {"value": 42, "is_archived": True}},
                 "tariffs": {"Water": {"rate_per_unit": 42}}
             },
             "43": {
                 "account_id": "43",
                 "address": "Адрес 43",
-                "company_name": "УК 43",
-                "company_address": "Адрес 43/1",
+                "company": {"name": "УК 43", "address": "Адрес 43/1"},
                 "meters": {"serial": {"value": 43}, "archived": {"value": 43, "is_archived": True}},
                 "tariffs": {"Water": {"rate_per_unit": 43}}
             },
