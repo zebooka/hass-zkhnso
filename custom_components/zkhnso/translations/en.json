@@ -146,6 +146,9 @@
       "combined_tariff": {
         "name": "Combined tariff {name}"
       },
+      "combined_tariff_formula": {
+        "name": "Combined tariff formula {name}"
+      },
       "company": {
         "name": "Housing management company"
       }

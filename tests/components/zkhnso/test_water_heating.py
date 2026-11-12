@@ -391,7 +391,7 @@ def test_sensor_setup_with_configured_rate(monkeypatch):
     add_entities.assert_called_once()
     args, kwargs = add_entities.call_args
     assert kwargs == {"update_before_add": False}
-    assert len(args[0]) == 4
+    assert len(args[0]) == 6
     assert sum(isinstance(entity, ZKHCombinedColdWaterTariffSensor) for entity in args[0]) == 1
     assert sum(isinstance(entity, ZKHCombinedHotWaterTariffSensor) for entity in args[0]) == 1
     sensor = next(entity for entity in args[0] if isinstance(entity, ZKHTariffSensor))

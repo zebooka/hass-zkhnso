@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from custom_components.zkhnso import config_flow
-from custom_components.zkhnso.sensor import ZKHMeterSensor, ZKHTariffSensor, ZKHCombinedColdWaterTariffSensor
+from custom_components.zkhnso.sensor import ZKHMeterSensor, ZKHTariffSensor, ZKHCombinedColdWaterTariffSensor, ZKHCombinedTariffFormulaSensor
 from homeassistant.util import slugify
 
 
@@ -78,13 +78,17 @@ def test_sensor_names_and_object_ids_use_entity_translations(language) -> None:
     meter = ZKHMeterSensor(coordinator, "222", {"name": "Газ", "serial_number": "222", "unit": "куб.м."}, "43")
     tariff = ZKHTariffSensor(coordinator, "ГАЗ", {"name": "ГАЗ", "unit": "куб.м."}, "43")
     combined = ZKHCombinedColdWaterTariffSensor(coordinator, "43")
-    for entity in (meter, tariff, combined):
+    formula = ZKHCombinedTariffFormulaSensor(combined)
+    for entity in (meter, tariff, combined, formula):
         entity.platform = SimpleNamespace(platform_name="zkhnso", domain="sensor",
             platform_translations=platform_translations(language), object_id_platform_translations=platform_translations("en"),
             component_translations={}, object_id_component_translations={})
         if hasattr(entity, "platform_data"):
             entity.platform_data = entity.platform
-        assert entity.name == platform_translations(language)[f"component.zkhnso.entity.sensor.{entity.translation_key}.name"].format(**entity.translation_placeholders)
+        if entity is combined:
+            assert entity.name == "ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ"
+        else:
+            assert entity.name == platform_translations(language)[f"component.zkhnso.entity.sensor.{entity.translation_key}.name"].format(**entity.translation_placeholders)
     assert slugify(f"{meter.device_info['name']} {meter.suggested_object_id}") == "no43_adres_2_meter_gaz_no222"
     assert slugify(f"{tariff.device_info['name']} {tariff.suggested_object_id}") == "no43_adres_2_tariff_gaz"
     assert slugify(f"{combined.device_info['name']} {combined.suggested_object_id}") == "no43_adres_2_combined_tariff_kholodnoe_vodosnabzhenie"

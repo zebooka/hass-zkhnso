@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from homeassistant.components.sensor import SensorDeviceClass
-from homeassistant.const import UnitOfEnergy, UnitOfVolume
+from homeassistant.const import EntityCategory, UnitOfEnergy, UnitOfVolume
 from homeassistant.helpers.device_registry import DeviceEntryType
 from custom_components.zkhnso.const import (
     WASTE_WATER_TARIFFS, COLD_WATER_TARIFFS, HOT_WATER_TARIFFS,
@@ -17,6 +17,7 @@ from custom_components.zkhnso.sensor import (
     HEAT_UNITS,
     VOLUME_UNITS,
     ZKHCombinedTariffSensor,
+    ZKHCombinedTariffFormulaSensor,
     ZKHCombinedColdWaterTariffSensor,
     ZKHCombinedHotWaterTariffSensor,
     ZKHCompanySensor,
@@ -66,11 +67,13 @@ def test_entry_sensors_share_account_device(device_registry) -> None:
     asyncio.run(async_setup_entry(None, entry, add_entities))
 
     entities = add_entities.call_args.args[0]
-    assert len(entities) == 5
+    assert len(entities) == 7
     assert {entity.unique_id for entity in entities} == {
         "entry_account_42_meter_1", "entry_account_42_tariff_water",
         "entry_account_42_combined_tariff_ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ",
         "entry_account_42_combined_tariff_ГОРЯЧЕЕ ВОДОСНАБЖЕНИЕ",
+        "entry_account_42_combined_tariff_ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ_formula",
+        "entry_account_42_combined_tariff_ГОРЯЧЕЕ ВОДОСНАБЖЕНИЕ_formula",
         "entry_account_42_company",
     }
     for entity in entities:
@@ -107,8 +110,8 @@ def test_multiple_accounts_are_isolated_and_new_accounts_are_discovered(device_r
     add_entities = MagicMock()
     asyncio.run(async_setup_entry(None, entry, add_entities))
     entities = add_entities.call_args.args[0]
-    assert len(entities) == 10
-    assert len({entity.unique_id for entity in entities}) == 10
+    assert len(entities) == 14
+    assert len({entity.unique_id for entity in entities}) == 14
     meters = {entity._account_id: entity for entity in entities if isinstance(entity, ZKHMeterSensor)}
     tariffs = {entity._account_id: entity for entity in entities if isinstance(entity, ZKHTariffSensor)}
     assert meters["42"].unique_id == "entry_account_42_meter_1"
@@ -123,7 +126,7 @@ def test_multiple_accounts_are_isolated_and_new_accounts_are_discovered(device_r
     assert meters["43"].device_info["name"] == "№43 Новый адрес"
     coordinator.data["accounts"]["44"] = account("Адрес 3", 50, 60)
     listener[0]()
-    assert len(add_entities.call_args.args[0]) == 5
+    assert len(add_entities.call_args.args[0]) == 7
     listener[0]()
     assert add_entities.call_count == 2
     del coordinator.data["accounts"]["43"]
@@ -391,6 +394,7 @@ def test_combined_cold_water_calculates_rate_and_attributes(waste_name, cold_nam
     sensor = ZKHCombinedColdWaterTariffSensor(_coordinator({"tariffs": {"waste": waste, "cold": cold}}), "42")
     assert sensor.native_value == 42.75
     assert sensor.extra_state_attributes == {
+        "name": "ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ",
         "names": [waste_name, cold_name],
         "formula": f"{waste_name} + {cold_name}",
         "from_date": "2026-03-01",
@@ -454,6 +458,51 @@ def test_setup_adds_combined_water_tariff_sensors(device_registry) -> None:
     assert sum(isinstance(sensor, ZKHTariffSensor) for sensor in entities) == 1
     assert sum(isinstance(sensor, ZKHCombinedColdWaterTariffSensor) for sensor in entities) == 1
     assert sum(isinstance(sensor, ZKHCombinedHotWaterTariffSensor) for sensor in entities) == 1
+    assert sum(isinstance(sensor, ZKHCombinedTariffFormulaSensor) for sensor in entities) == 2
+
+
+def test_combined_tariff_formula_diagnostics_update_and_handle_missing_data() -> None:
+    coordinator = _coordinator({"tariffs": {
+        "waste": _tariff("ВОДООТВЕДЕНИЕ", 5),
+        "cold": _tariff("ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ", 10),
+        "hot": _tariff("ГОРЯЧЕЕ ВОДОСНАБЖЕНИЕ", 50),
+        "heating": _tariff("ОТОПЛЕНИЕ", 1000, unit="Гкал"),
+    }})
+    cold = ZKHCombinedColdWaterTariffSensor(coordinator, "42")
+    hot = ZKHCombinedHotWaterTariffSensor(coordinator, 0.05, "42")
+    cold_formula = ZKHCombinedTariffFormulaSensor(cold)
+    hot_formula = ZKHCombinedTariffFormulaSensor(hot)
+
+    assert cold_formula.entity_category == EntityCategory.DIAGNOSTIC
+    assert cold_formula.unique_id == f"{cold.unique_id}_formula"
+    assert hot_formula.unique_id == f"{hot.unique_id}_formula"
+    assert cold_formula.device_info == cold.device_info
+    assert cold_formula.translation_key == "combined_tariff_formula"
+    assert cold_formula.translation_placeholders == {"name": cold.name}
+    assert cold_formula.native_unit_of_measurement is None
+    assert cold_formula.native_value == "ВОДООТВЕДЕНИЕ + ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ"
+    assert hot_formula.native_value == "ВОДООТВЕДЕНИЕ + ГОРЯЧЕЕ ВОДОСНАБЖЕНИЕ"
+
+    coordinator.entry.options["account_options"]["42"]["hot_water_tariff"] = "ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ"
+    assert hot_formula.native_value == "ВОДООТВЕДЕНИЕ + ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ + ОТОПЛЕНИЕ × 0.05"
+    coordinator.data["accounts"]["42"]["tariffs"]["cold"]["rate_per_unit"] = None
+    assert cold_formula.native_value is None
+    assert hot_formula.native_value is None
+    coordinator.data = None
+    assert cold_formula.native_value is None
+    assert hot_formula.native_value is None
+
+
+def test_combined_tariff_formula_diagnostics_are_account_specific() -> None:
+    coordinator = _coordinator({"accounts": {
+        "42": {"tariffs": {"w": _tariff("ВОДООТВЕДЕНИЕ", 5), "c": _tariff("ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ", 10)}},
+        "43": {"tariffs": {"w": _tariff("ОТВЕД. СТОЧ. ВОД СОИ", 5), "c": _tariff("ХВ НА СОД-Е ОБЩ.ИМУЩ.", 10)}},
+    }})
+    first = ZKHCombinedTariffFormulaSensor(ZKHCombinedColdWaterTariffSensor(coordinator, "42"))
+    second = ZKHCombinedTariffFormulaSensor(ZKHCombinedColdWaterTariffSensor(coordinator, "43"))
+    assert first.native_value == "ВОДООТВЕДЕНИЕ + ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ"
+    assert second.native_value == "ОТВЕД. СТОЧ. ВОД СОИ + ХВ НА СОД-Е ОБЩ.ИМУЩ."
+    assert first.unique_id != second.unique_id
 
 
 @pytest.mark.parametrize("hot_name", ["ГОРЯЧЕЕ ВОДОСНАБЖЕНИЕ", "ГВ НА СОД-Е ОБЩ.ИМУЩ."])
@@ -468,6 +517,7 @@ def test_combined_hot_water_direct_tariff(hot_name) -> None:
     sensor = ZKHCombinedHotWaterTariffSensor(coordinator, None, "42")
     assert sensor.native_value == 62.5
     assert sensor.extra_state_attributes == {
+        "name": "ГОРЯЧЕЕ ВОДОСНАБЖЕНИЕ",
         "names": ["ВОДООТВЕДЕНИЕ", hot_name],
         "formula": f"ВОДООТВЕДЕНИЕ + {hot_name}",
         "from_date": "2026-03-01",
@@ -487,6 +537,7 @@ def test_combined_hot_water_heating_calculation(heating_name, fluid_name, heat_u
     sensor = ZKHCombinedHotWaterTariffSensor(coordinator, 0.06528, "42")
     assert sensor.native_value == 123.34
     assert sensor.extra_state_attributes == {
+        "name": "ГОРЯЧЕЕ ВОДОСНАБЖЕНИЕ",
         "names": ["ОТВЕД. СТОЧ. ВОД СОИ", fluid_name, heating_name],
         "formula": f"ОТВЕД. СТОЧ. ВОД СОИ + {fluid_name} + {heating_name} × 0.06528",
         "from_date": "2026-03-01",
@@ -523,6 +574,7 @@ def test_combined_hot_water_without_heating_rate() -> None:
     zero_rate_sensor = ZKHCombinedHotWaterTariffSensor(coordinator, 0, "42")
     assert zero_rate_sensor.native_value == 15
     assert zero_rate_sensor.extra_state_attributes == {
+        "name": "ГОРЯЧЕЕ ВОДОСНАБЖЕНИЕ",
         "names": ["ВОДООТВЕДЕНИЕ", "ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ", "ОТОПЛЕНИЕ"],
         "formula": "ВОДООТВЕДЕНИЕ + ХОЛОДНОЕ ВОДОСНАБЖЕНИЕ + ОТОПЛЕНИЕ × 0",
         "from_date": "2026-03-01",

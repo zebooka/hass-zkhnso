@@ -6,7 +6,7 @@ from typing import Any
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import UnitOfArea, UnitOfEnergy, UnitOfVolume
+from homeassistant.const import EntityCategory, UnitOfArea, UnitOfEnergy, UnitOfVolume
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo, async_get as async_get_device_registry
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -62,9 +62,10 @@ async def async_setup_entry(
                         known.add(identity)
 
             if account.get("tariffs") and (account_id, "combined", "water") not in known:
-                entities.append(ZKHCombinedColdWaterTariffSensor(coordinator, account_id))
+                cold = ZKHCombinedColdWaterTariffSensor(coordinator, account_id)
                 account_options = entry.options.get(CONF_ACCOUNT_OPTIONS, {}).get(account_id, {})
-                entities.append(ZKHCombinedHotWaterTariffSensor(coordinator, account_options.get(CONF_WATER_HEATING_RATE), account_id))
+                hot = ZKHCombinedHotWaterTariffSensor(coordinator, account_options.get(CONF_WATER_HEATING_RATE), account_id)
+                entities.extend((cold, hot, ZKHCombinedTariffFormulaSensor(cold), ZKHCombinedTariffFormulaSensor(hot)))
                 known.add((account_id, "combined", "water"))
 
             if (account_id, "company", "") not in known:
@@ -294,6 +295,24 @@ class ZKHCombinedTariffSensor(ZKHSensor):
                     return tariff
 
         return None
+
+class ZKHCombinedTariffFormulaSensor(ZKHSensor):
+    """Expose the formula of a combined tariff as a diagnostic sensor."""
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:function-variant"
+    _attr_translation_key = "combined_tariff_formula"
+
+    def __init__(self, tariff_sensor: ZKHCombinedTariffSensor) -> None:
+        super().__init__(tariff_sensor.coordinator, tariff_sensor._account_id)
+        self._tariff_sensor = tariff_sensor
+        self._attr_unique_id = f"{tariff_sensor.unique_id}_formula"
+        self._attr_translation_placeholders = {"name": tariff_sensor.name}
+
+    @property
+    def native_value(self) -> str | None:
+        return self._tariff_sensor.extra_state_attributes.get("formula")
+
 
 class ZKHCombinedColdWaterTariffSensor(ZKHCombinedTariffSensor):
     def __init__(

@@ -146,6 +146,9 @@
       "combined_tariff": {
         "name": "Суммарный тариф {name}"
       },
+      "combined_tariff_formula": {
+        "name": "Формула суммарного тарифа {name}"
+      },
       "company": {
         "name": "Управляющая компания"
       }
