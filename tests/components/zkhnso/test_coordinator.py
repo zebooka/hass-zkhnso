@@ -43,7 +43,7 @@ class _Client:
             "company": {"name": f"УК {self.current_account_id}", "address": f"Адрес {self.current_account_id}/1"},
         }
 
-    async def get_meters(self):
+    async def get_active_meters(self):
         return {"serial": {"value": int(self.current_account_id)}}
 
     async def get_archived_meters(self):
@@ -210,10 +210,10 @@ def test_accounts_are_processed_sequentially_on_initial_and_repeated_refresh(mon
                 events.append(("switch", account_id))
                 await super().change_account(account_id)
 
-            async def get_meters(self):
+            async def get_active_meters(self):
                 events.append(("meters", self.current_account_id))
                 await asyncio.sleep(0)
-                return await super().get_meters()
+                return await super().get_active_meters()
 
             async def get_archived_meters(self):
                 events.append(("archived_meters", self.current_account_id))
@@ -301,7 +301,7 @@ def test_coordinator_rejects_partial_account_data(monkeypatch, failed_method) ->
     async def fetch():
         return None if client.current_account_id == "43" else {}
     if failed_method == "both_meters":
-        client.get_meters = fetch
+        client.get_active_meters = fetch
         client.get_archived_meters = fetch
     else:
         setattr(client, failed_method, fetch)
@@ -314,7 +314,7 @@ def test_coordinator_rejects_partial_account_data(monkeypatch, failed_method) ->
 
 @pytest.mark.parametrize(
     ("failed_method", "remaining_key"),
-    [("get_meters", "archived"), ("get_archived_meters", "serial")],
+    [("get_active_meters", "archived"), ("get_archived_meters", "serial")],
 )
 def test_coordinator_keeps_meters_when_one_request_fails(monkeypatch, failed_method, remaining_key) -> None:
     import custom_components.zkhnso.coordinator as coordinator_module

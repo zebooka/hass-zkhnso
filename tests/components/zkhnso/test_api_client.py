@@ -184,22 +184,24 @@ def test_process_meters_preserves_fractional_reading() -> None:
     """Meter values retain fractional readings from the portal."""
     client = ZKHAPIClient("user", "password")
 
-    result = client._process_meters_data(
+    result = client._process_active_meters_data(
         [
             ["header"],
             ["Water", "123", "куб.м.", "01.01.2026", "12,34", "", "", "", "01.01.2030"],
-        ]
+        ],
+        [None, "code:1"],
     )
 
     assert result["123"]["value"] == 12.34
     assert result["123"]["is_archived"] is False
+    assert result["123"]["zkhnso_id"] == "code:1"
 
 
 def test_process_meters_supports_both_counter_row_formats() -> None:
     """The verification date location depends on whether a reading was sent today."""
     client = ZKHAPIClient("user", "password")
 
-    result = client._process_meters_data(
+    result = client._process_active_meters_data(
         [
             ["header"],
             [
@@ -223,11 +225,14 @@ def test_process_meters_supports_both_counter_row_formats() -> None:
                 "02.06.2028",
                 "История",
             ],
-        ]
+        ],
+        [None, "first:1", None],
     )
 
     assert result["26_16185541"]["next_verification_date"] == "2028-06-02"
     assert result["22_157073"]["next_verification_date"] == "2028-06-02"
+    assert result["26_16185541"]["zkhnso_id"] == "first:1"
+    assert result["22_157073"]["zkhnso_id"] is None
 
 
 def test_get_meters_parses_active_and_archived_tables() -> None:
@@ -235,7 +240,9 @@ def test_get_meters_parses_active_and_archived_tables() -> None:
     active_html = '''
         <form id="countersForm">
           <table><tr><th>Active</th></tr>
-            <tr><td>Вода</td><td>22-123</td><td>куб.м.</td><td>01.01.2026</td><td>12,34</td><td>02.01.2030</td></tr>
+            <tr><td>Вода</td><td>22-123</td><td>куб.м.</td><td>01.01.2026</td><td>12,34</td><td>02.01.2030</td><td>Hist</td></tr>
+            <tr><td>Вода</td><td>22-124</td><td>куб.м.</td><td>02.01.2026</td><td>12,34</td><td colspan="3"></td><td>02.01.2030</td><td>Hist</td></tr>
+            <tr><td>Вода</td><td>22-125</td><td>куб.м.</td><td>03.01.2026</td><td>12.34<span class="count-prev" style="display: none">1</span></td><td><input name="counterValue[0]" value=""></td><td><input name="counterDate[0]" value="01.01.2026"></td><td>...</td><input type="hidden" name="counterCode[0]" value="1234:1"><input type="hidden" name="counterDiff[0]" value=""><td>02.01.2030</td><td>Hist</td></tr>
           </table>
         </form>
     '''
@@ -243,14 +250,18 @@ def test_get_meters_parses_active_and_archived_tables() -> None:
         <form id="countersForm">
           <table><tr><th>Active</th></tr></table>
           <table><tr><th>Archived</th></tr>
-            <tr><td>Вода</td><td>22-456</td><td>куб.м.</td><td>02.02.2025</td><td>00193.000</td><td>03.03.2029</td></tr>
+            <tr><td>Вода</td><td>22-456</td><td>куб.м.</td><td>02.02.2025</td><td>00193.000</td><td>03.03.2029</td><td>Hist</td></tr>
           </table>
         </form>
     '''
     client._get_page = AsyncMock(side_effect=[active_html, archived_html])
-    assert asyncio.run(client.get_meters()) == {
+    assert asyncio.run(client.get_active_meters()) == {
         "22_123": {"name": "Вода", "serial_number": "22-123", "unit": "куб.м.",
-                   "date": "2026-01-01", "value": 12.34, "next_verification_date": "2030-01-02", "is_archived": False},
+                   "date": "2026-01-01", "value": 12.34, "next_verification_date": "2030-01-02", "is_archived": False, "zkhnso_id": None},
+        "22_124": {"name": "Вода", "serial_number": "22-124", "unit": "куб.м.",
+                   "date": "2026-01-02", "value": 12.34, "next_verification_date": "2030-01-02", "is_archived": False, "zkhnso_id": None},
+        "22_125": {"name": "Вода", "serial_number": "22-125", "unit": "куб.м.",
+                   "date": "2026-01-03", "value": 12.34, "next_verification_date": "2030-01-02", "is_archived": False, "zkhnso_id": "1234:1"},
     }
     assert asyncio.run(client.get_archived_meters()) == {
         "22_456": {"name": "Вода", "serial_number": "22-456", "unit": "куб.м.",
@@ -260,6 +271,28 @@ def test_get_meters_parses_active_and_archived_tables() -> None:
         (("https://xn--f1aijeow.xn--p1ai/room/lk/counters.action", "Meters"), {}),
         (("https://xn--f1aijeow.xn--p1ai/room/lk/counters!mode.action?showOff=true", "Archived meters"), {}),
     ]
+
+
+def test_get_active_meters_extracts_optional_counter_codes() -> None:
+    """Each row keeps its own code, including missing and empty values."""
+    client = ZKHAPIClient("user", "password")
+    client._get_page = AsyncMock(return_value='''
+        <form id="countersForm"><table>
+          <tr><th>Meter</th></tr>
+          <tr><td>Water</td><td>1</td><td>м³</td><td>01.01.2026</td><td>10</td><td>01.01.2030</td>
+              <input name="counterCode[0]" value="123:1"></tr>
+          <tr><td>Water</td><td>2</td><td>м³</td><td>01.01.2026</td><td>20</td><td>01.01.2030</td></tr>
+          <tr><td>Water</td><td>3</td><td>м³</td><td>01.01.2026</td><td>30</td><td>01.01.2030</td>
+              <input name="counterCode[2]"></tr>
+          <tr><td>Water</td><td>4</td><td>м³</td><td>01.01.2026</td><td>40</td><td>01.01.2030</td>
+              <input name="counterCode[3]" value=""></tr>
+        </table></form>
+    ''')
+
+    meters = asyncio.run(client.get_active_meters())
+    assert {key: meter["zkhnso_id"] for key, meter in meters.items()} == {
+        "1": "123:1", "2": None, "3": None, "4": "",
+    }
 
 
 @pytest.fixture
@@ -321,7 +354,7 @@ def portal_meters(portal_counters_form) -> dict:
     active_form.select("#countersForm table")[1].decompose()
     client._get_page = AsyncMock(side_effect=[str(active_form), portal_counters_form])
     async def fetch():
-        active = await client.get_meters()
+        active = await client.get_active_meters()
         archived = await client.get_archived_meters()
         return {**active, **archived}
     return asyncio.run(fetch())
@@ -330,9 +363,9 @@ def portal_meters(portal_counters_form) -> dict:
 def test_get_meters_with_portal_form(portal_meters) -> None:
     assert portal_meters == {
         "22_157073": {"name": "гор.вода", "serial_number": "22-157073", "unit": "куб.м.",
-                      "date": "2026-10-25", "value": 172.0, "next_verification_date": "2028-06-02", "is_archived": False},
+                      "date": "2026-10-25", "value": 172.0, "next_verification_date": "2028-06-02", "is_archived": False, "zkhnso_id": "146047636464:1"},
         "22_171694": {"name": "хол.вода", "serial_number": "22-171694", "unit": "куб.м.",
-                      "date": "2026-10-25", "value": 532.0, "next_verification_date": "2028-06-02", "is_archived": False},
+                      "date": "2026-10-25", "value": 532.0, "next_verification_date": "2028-06-02", "is_archived": False, "zkhnso_id": "145951290085:1"},
         "1016061717404": {"name": "хол.вода", "serial_number": "1016061717404", "unit": "куб.м.",
                           "date": "2022-10-04", "value": 681.0, "next_verification_date": "2022-10-05", "is_archived": True},
         "1010122602500": {"name": "гор.вода", "serial_number": "1010122602500", "unit": "куб.м.",
@@ -355,18 +388,20 @@ def test_get_meters_preserves_archived_meters_with_duplicate_serial(portal_meter
     (None, None),
     ("", None),
     ('<form id="countersForm"><table><tr><th>Active</th></tr></table></form>', {}),
-    ('<form id="countersForm"></form>', {}),
+    ('<form id="countersForm"></form>', None),
 ])
 def test_get_meters_handles_missing_or_empty_tables(html, expected) -> None:
     client = ZKHAPIClient("user", "password")
     client._get_page = AsyncMock(return_value=html)
-    assert asyncio.run(client.get_meters()) == expected
+    assert asyncio.run(client.get_active_meters()) == expected
 
 
 @pytest.mark.parametrize("html,expected", [
     (None, None),
     ("", None),
-    ('<form id="countersForm"><table><tr><th>Active</th></tr></table></form>', {}),
+    ('<form id="countersForm"><table><tr><th>Active</th></tr></table></form>', None),
+    ('<form id="countersForm"><table><tr><th>Active</th></tr></table>'
+     '<table><tr><th>Archive</th></tr></table></form>', {}),
     ('<form id="countersForm"><table><tr><th>Active</th></tr></table>'
      '<table><tr><th>Archive</th></tr><tr><td>Water</td><td>1</td><td>м³</td>'
      '<td>01.01.2026</td><td>10</td><td>01.01.2030</td></tr></table></form>',
@@ -505,18 +540,20 @@ def test_process_data_skips_invalid_rows() -> None:
     """Parsers retain valid rows and ignore incomplete input rows."""
     client = ZKHAPIClient("user", "password")
 
-    meters = client._process_meters_data(
-        [["header"], ["incomplete"], ["Water", "42", "куб.м.", "01.01.2026", "1", "", "", "", "02.01.2030"]]
+    meters = client._process_active_meters_data(
+        [["header"], ["incomplete"], ["Water", "42", "куб.м.", "01.01.2026", "1", "", "", "", "02.01.2030"]],
+        [None, "bad", "valid:1"],
     )
     tariffs = client._process_tariffs_data(
         [["header"], ["incomplete"], ["Water", "1", "куб.м.", "2", "01.01.2026"]]
     )
 
     assert list(meters) == ["42"]
+    assert meters["42"]["zkhnso_id"] == "valid:1"
     assert list(tariffs) == ["Water"]
 
 
 def test_empty_tables_produce_empty_data() -> None:
     client = ZKHAPIClient("user", "password")
-    assert client._process_meters_data([]) == {}
+    assert client._process_active_meters_data([], []) == {}
     assert client._process_tariffs_data([]) == {}

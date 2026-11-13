@@ -10,6 +10,7 @@ API_URL_CHANGE_ACCOUNT_ID = "main!change.action?account=%s"
 API_URL_MAIN = "main.action"
 API_URL_TARIFFS = "tariffs.action"
 API_URL_METERS = "counters.action"
+API_URL_METERS_SAVE = "counters!save.action"
 API_URL_ARCHIVED_METERS = "counters!mode.action?showOff=true"
 
 # Session keys

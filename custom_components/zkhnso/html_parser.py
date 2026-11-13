@@ -110,23 +110,36 @@ def html_to_str(
     return " ".join(t.split()) or None if isinstance(t, str) else None
 
 
-def extract_cells_from_table_rows(
-    html: str,
+def extract_table_rows(
+    html: str | Tag,
     tr_selector: str,
     page_name: str,
-) -> list[list[Tag]] | None:
+) -> list[Tag] | None:
     try:
-        soup = BeautifulSoup(html, "html.parser")
-        rows = soup.select(tr_selector)
+        if isinstance(html, str):
+            html = BeautifulSoup(html, "html.parser")
+        rows = html.select(tr_selector)
         if not rows:
             _LOGGER.warning("No %s table rows found (%s)", page_name.casefold(), tr_selector)
             return None
 
         _LOGGER.debug("Soup %s table rows (%s): %s", page_name.casefold(), tr_selector, rows)
-        return [row.find_all(["td", "th"]) for row in rows]
+        return rows
     except Exception as e:
         _LOGGER.error("Error extracting %s table rows (%s): %s", page_name.casefold(), tr_selector, e)
         return None
+
+
+def extract_table_cells_from_rows(rows: list[Tag]) -> list[list[Tag]]:
+    return [row.find_all(["td", "th"]) for row in rows]
+
+def extract_table_cells(
+    html: str | Tag,
+    tr_selector: str | None,
+    page_name: str,
+) -> list[list[Tag]] | None:
+    rows = extract_table_rows(html, tr_selector, page_name)
+    return extract_table_cells_from_rows(rows) if rows else None
 
 
 def extract_cell_text(cell: Tag) -> str:

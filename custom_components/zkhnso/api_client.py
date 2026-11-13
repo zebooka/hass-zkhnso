@@ -9,6 +9,7 @@ from typing import Any
 from urllib.parse import quote, urlencode, urljoin, urlsplit
 
 import aiohttp
+from bs4 import Tag
 from yarl import URL
 
 from .const import (
@@ -23,7 +24,13 @@ from .const import (
     SESSION_FORM_TOKEN,
     SESSION_JSESSIONID,
 )
-from .html_parser import extract_cells_from_table_rows, extract_cell_text, extract_cell_href, html_to_str, html_to_json
+from .html_parser import (
+    extract_table_cells,
+    extract_cell_text,
+    extract_cell_href,
+    html_to_str,
+    extract_table_rows, extract_table_cells_from_rows
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -180,7 +187,7 @@ class ZKHAPIClient:
 
                     self.accounts = {self.current_account_id: None}
 
-                    rows = extract_cells_from_table_rows(html, ".header .account .acc-select .accounts-grid tr", "Accounts") or []
+                    rows = extract_table_cells(html, ".header .account .acc-select .accounts-grid tr", "Accounts") or []
                     for row in rows:
                         if len(row) < 2:
                             continue
@@ -248,13 +255,13 @@ class ZKHAPIClient:
                     )
                     return None
 
-                html_content = await response.text()
-                self._log_page_diagnostics(page_name, response, html_content)
-                if self._is_login_page(html_content):
+                html = await response.text()
+                self._log_page_diagnostics(page_name, response, html)
+                if self._is_login_page(html):
                     _LOGGER.warning("%s response returned the login page", page_name)
                     return None
 
-                return html_content
+                return html
         except aiohttp.ClientError as err:
             _LOGGER.error("Error during %s request: %s", page_name.casefold(), err)
             return None
@@ -276,36 +283,52 @@ class ZKHAPIClient:
             },
         }
 
-    async def _get_data(self, url: str, selector: str, page_name: str) -> list[list[str]] | None:
-        """Fetch an authenticated page and extract rows from its table."""
+    async def _get_page_rows(self, url: str, tr_selector: str, page_name: str) -> list[Tag] | None:
+        """Fetch an authenticated page and extract TR rows from its table."""
         html = await self._get_page(url, page_name)
         if not html:
             return None
 
-        rows = extract_cells_from_table_rows(html, selector, page_name)
+        rows = extract_table_rows(html, tr_selector, page_name)
         if not rows:
             _LOGGER.warning("No %s table rows found at %s", page_name.casefold(), url)
             return []
 
-        return [[extract_cell_text(cell) for cell in row] for row in rows]
+        return rows
 
-    async def get_meters(self) -> dict[str, Any] | None:
+    async def _get_page_cells_text(self, url: str, tr_selector: str, page_name: str) -> list[list[str]] | None:
+        """Fetch an authenticated page and extract text from TH, TD cells."""
+        html = await self._get_page(url, page_name)
+        if not html:
+            return None
+
+        rows = extract_table_cells(html, tr_selector, page_name)
+        if not rows:
+            _LOGGER.warning("No %s table rows found at %s", page_name.casefold(), url)
+            return []
+
+        return [[extract_cell_text(cell) for cell in row] for row in rows] if rows else None
+
+    async def get_active_meters(self) -> dict[str, Any] | None:
         """Fetch meters data."""
         url = urljoin(API_BASE_URL, API_URL_METERS)
-        rows = await self._get_data(url, "#countersForm table tr", "Meters")
-        return self._process_meters_data(rows) if rows is not None else None
+        rows = await self._get_page_rows(url, "#countersForm table tr", "Meters")
+        return self._process_active_meters_data(
+            [[extract_cell_text(cell) for cell in row] for row in extract_table_cells_from_rows(rows)],
+            [input.get("value") if (input := row.select_one("input[name^='counterCode[']")) else None for row in rows]
+        ) if rows else None
 
     async def get_archived_meters(self) -> dict[str, Any] | None:
         """Fetch archive meters data."""
         url = urljoin(API_BASE_URL, API_URL_ARCHIVED_METERS)
-        rows = await self._get_data(url, "#countersForm table:nth-of-type(2) tr", "Archived meters")
-        return self._process_archive_meters_data(rows) if rows is not None else None
+        rows = await self._get_page_cells_text(url, "#countersForm table:nth-of-type(2) tr", "Archived meters")
+        return self._process_archive_meters_data(rows) if rows else None
 
     async def get_tariffs(self) -> dict[str, Any] | None:
         """Fetch tariffs data."""
         url = urljoin(API_BASE_URL, API_URL_TARIFFS)
-        rows = await self._get_data(url, "#tariffsForm table tr", "Tariffs")
-        return self._process_tariffs_data(rows) if rows is not None else None
+        rows = await self._get_page_cells_text(url, "#tariffsForm table tr", "Tariffs")
+        return self._process_tariffs_data(rows) if rows else None
 
     def _parse_float(self, value_str: str) -> float | None:
         """Extract and parse float value from string."""
@@ -330,14 +353,14 @@ class ZKHAPIClient:
         """Sanitize serial number for use as key (replace non-digits with underscore)."""
         return re.sub(r"[^0-9]", "_", serial)
 
-    def _process_meters_data(self, rows: list[list[str]]) -> dict[str, Any]:
+    def _process_active_meters_data(self, rows: list[list[str]], zkhnso_ids: list[str | None]) -> dict[str, Any]:
         """Process table rows into meters data structure."""
         if not rows or len(rows) < 2 or (len(rows) == 2 and len(rows[1]) == 1):
             return {}
 
         meters = {}
 
-        for row in rows[1:]:
+        for row, zkhnso_id in zip(rows[1:], zkhnso_ids[1:]):
             _LOGGER.debug("Row: %s", row)
             if len(row) < 6:
                 _LOGGER.warning("Row has insufficient columns: %s", row)
@@ -351,8 +374,9 @@ class ZKHAPIClient:
                     "unit": row[2].strip(),
                     "date": self._parse_date(row[3].strip()),
                     "value": self._parse_float(row[4].strip()),
-                    "next_verification_date": self._parse_date(row[5].strip() if len(row) < 9 else row[8].strip()),
+                    "next_verification_date": self._parse_date(row[len(row) - 2].strip()),
                     "is_archived": False,
+                    "zkhnso_id": zkhnso_id,
                 }
 
                 _LOGGER.debug("Meter %s: %s", key, meter)

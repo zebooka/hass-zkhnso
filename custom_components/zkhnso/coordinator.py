@@ -60,9 +60,9 @@ class ZKHDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 if address_info is None:
                     raise UpdateFailed("Failed to fetch ZKHNSO address info data")
 
-                meters = await client.get_meters()
+                active_meters = await client.get_active_meters()
                 archived_meters = await client.get_archived_meters()
-                if meters is None and archived_meters is None:
+                if active_meters is None and archived_meters is None:
                     raise UpdateFailed("Failed to fetch ZKHNSO meters data")
 
                 tariffs = await client.get_tariffs()
@@ -72,7 +72,7 @@ class ZKHDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 accounts[account_id] = {
                     **address_info,
                     "account_id": account_id,
-                    "meters": { **(meters or {}), **(archived_meters or {}) },
+                    "meters": { **(active_meters or {}), **(archived_meters or {}) },
                     "tariffs": tariffs,
                 }
 
