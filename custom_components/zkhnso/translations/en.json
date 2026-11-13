@@ -1,4 +1,10 @@
 {
+  "notifications": {
+    "meter_verification": {
+      "title": "Meter verification is approaching",
+      "message": "{name} #{serial_number}, Acct.No. #{account_id}: verification on {verification_date}"
+    }
+  },
   "config": {
     "step": {
       "user": {

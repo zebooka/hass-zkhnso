@@ -3,17 +3,21 @@ from __future__ import annotations
 
 import asyncio
 from datetime import date
+from hashlib import sha256
 import json
 from typing import TYPE_CHECKING
 
+from homeassistant.components import persistent_notification
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
+from homeassistant.helpers.translation import async_get_translations
 from homeassistant.util import dt as dt_util
 
 if TYPE_CHECKING:
     from .sensor import ZKHMeterSensor
 
 EVENT_METER_VERIFICATION_ALERT = "zkhnso_meter_verification_alert"
+NOTIFICATION_KEY = "component.zkhnso.notifications.meter_verification"
 
 
 class MeterVerificationAlerts:
@@ -51,9 +55,16 @@ class MeterVerificationAlerts:
             if key in self._sent:
                 return
 
-            updated = self._sent | {key}
-            await self.store.async_save({"sent": sorted(updated)})
-            self._sent = updated
+            translations = await async_get_translations(
+                self.hass, self.hass.config.language, "notifications", integrations={"zkhnso"}
+            )
+            title = translations[f"{NOTIFICATION_KEY}.title"]
+            message = translations[f"{NOTIFICATION_KEY}.message"].format(
+                name=attributes.get("meter_name") or "",
+                serial_number=attributes.get("serial_number") or "",
+                account_id=sensor._account_id,
+                verification_date=verification_date.strftime("%d.%m.%Y"),
+            )
             self.hass.bus.async_fire(
                 EVENT_METER_VERIFICATION_ALERT,
                 {
@@ -67,3 +78,8 @@ class MeterVerificationAlerts:
                     "days_left": days_left,
                 },
             )
+            notification_id = f"zkhnso_verification_{sha256(key.encode()).hexdigest()}"
+            persistent_notification.async_create(self.hass, message, title, notification_id)
+            updated = self._sent | {key}
+            await self.store.async_save({"sent": sorted(updated)})
+            self._sent = updated

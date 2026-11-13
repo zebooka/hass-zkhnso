@@ -63,9 +63,11 @@ Data is updated once per hour. The integration creates a separate device with me
 
 ### Meter verification event
 
-The `zkhnso_meter_verification_alert` event fires when an enabled active meter sensor is 30 calendar days or less away from its verification date, including overdue dates. It fires at most once per meter and verification date, including across Home Assistant restarts. A changed date can trigger a new event. Archived and disabled meters are not checked.
+The `zkhnso_meter_verification_alert` event fires when an enabled active meter sensor is 30 calendar days or less away from its verification date, including overdue dates. Under normal operation, it fires once per meter and verification date, including across Home Assistant restarts. A changed date can trigger a new event. Archived and disabled meters are not checked. The integration also creates a persistent Home Assistant notification in the system language. 
 
-Event data contains `entry_id`, `entity_id`, `account_id`, `meter_id`, `serial_number`, `name`, `next_verification_date` and `days_left`, which is negative for overdue dates; it does not contain an address. Home Assistant's event bus does not persist events, so an automation not yet loaded at startup may miss an alert. The sent marker is saved before firing, so a failure between these operations can also result in a missed event.
+Event data contains `entry_id`, `entity_id`, `account_id`, `meter_id`, `serial_number`, `name`, `next_verification_date` and `days_left`, which is negative for overdue dates. Home Assistant's event bus does not persist events, so an automation not yet loaded at startup may miss an alert. The sent marker is saved after the event and notification; if it is not saved, the event may be sent again. Firing the event does not guarantee that an automation has processed it.
+
+Automation example:
 
 ```yaml
 automation:
@@ -74,7 +76,7 @@ automation:
       - trigger: event
         event_type: zkhnso_meter_verification_alert
     actions:
-      - action: persistent_notification.create
+      - action: notify.mobile_app_PHONE
         data:
           title: Meter verification is approaching
           message: >-
@@ -82,6 +84,9 @@ automation:
             Acct.No.: #{{ trigger.event.data.account_id }}:
             verification on {{ trigger.event.data.next_verification_date | as_timestamp |
             timestamp_custom('%d.%m.%Y') }}
+          data:
+            push:
+              interruption-level: time-sensitive
 ```
 
 ## Calculating meter costs
