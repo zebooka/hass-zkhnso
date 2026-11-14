@@ -1,9 +1,7 @@
 {
-  "notifications": {
-    "meter_verification": {
-      "title": "Meter verification is approaching",
-      "message": "{name} #{serial_number}, Acct.No. #{account_id}: verification on {verification_date}"
-    }
+  "common": {
+    "meter_verification_title": "Meter verification is approaching",
+    "meter_verification_message": "{name} #{serial_number}, Acct.No. #{account_id}: verification on {verification_date}"
   },
   "config": {
     "step": {

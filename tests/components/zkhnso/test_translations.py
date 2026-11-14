@@ -40,6 +40,16 @@ def test_english_and_russian_translations_match() -> None:
         assert english_fields == russian_fields, path
 
 
+@pytest.mark.parametrize("language", ["en", "ru"])
+def test_notification_strings_use_common_translation_category(language) -> None:
+    """The common category contains flat strings accepted by hassfest."""
+    path = Path(config_flow.__file__).parent / "translations" / f"{language}.json"
+    translations = json.loads(path.read_text(encoding="utf-8"))
+    assert "notifications" not in translations
+    assert isinstance(translations["common"]["meter_verification_title"], str)
+    assert isinstance(translations["common"]["meter_verification_message"], str)
+
+
 @pytest.mark.parametrize(
     ("language", "expected"),
     [("ru", "Настройки ЖКХНСО обновлены"), ("en", "ZKHNSO settings were updated")],

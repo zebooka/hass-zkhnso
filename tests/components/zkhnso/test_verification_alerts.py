@@ -28,11 +28,11 @@ REAL_CREATE_NOTIFICATION = persistent_notification.async_create
 def notification_dependencies(monkeypatch):
     """Use real translation files while isolating the notification API."""
     async def translations(hass, language, category, integrations):
-        assert category == "notifications"
+        assert category == "common"
         assert integrations == {"zkhnso"}
         path = Path(verification_alerts.__file__).parent / "translations" / f"{language}.json"
-        data = json.loads(path.read_text(encoding="utf-8"))["notifications"]["meter_verification"]
-        return {f"component.zkhnso.notifications.meter_verification.{key}": value for key, value in data.items()}
+        data = json.loads(path.read_text(encoding="utf-8"))["common"]
+        return {f"component.zkhnso.common.{key}": value for key, value in data.items()}
 
     monkeypatch.setattr("custom_components.zkhnso.verification_alerts.async_get_translations", translations)
     create = MagicMock()
@@ -184,6 +184,7 @@ def test_retry_after_save_failure(monkeypatch, notification_dependencies):
 @pytest.mark.parametrize("language,title,message", [
     ("ru", "Приближается поверка счётчика", "Вода №123, ЛС: №42: поверка 11.12.2026"),
     ("en", "Meter verification is approaching", "Вода #123, Acct.No. #42: verification on 11.12.2026"),
+    ("de", "Meter verification is approaching", "Вода #123, Acct.No. #42: verification on 11.12.2026"),
 ])
 def test_real_home_assistant_translation_and_notification(monkeypatch, language, title, message):
     async def run():

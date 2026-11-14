@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from .sensor import ZKHMeterSensor
 
 EVENT_METER_VERIFICATION_ALERT = "zkhnso_meter_verification_alert"
-NOTIFICATION_KEY = "component.zkhnso.notifications.meter_verification"
+NOTIFICATION_KEY = "component.zkhnso.common.meter_verification"
 
 
 class MeterVerificationAlerts:
@@ -56,10 +56,10 @@ class MeterVerificationAlerts:
                 return
 
             translations = await async_get_translations(
-                self.hass, self.hass.config.language, "notifications", integrations={"zkhnso"}
+                self.hass, self.hass.config.language, "common", integrations={"zkhnso"}
             )
-            title = translations[f"{NOTIFICATION_KEY}.title"]
-            message = translations[f"{NOTIFICATION_KEY}.message"].format(
+            title = translations[f"{NOTIFICATION_KEY}_title"]
+            message = translations[f"{NOTIFICATION_KEY}_message"].format(
                 name=attributes.get("meter_name") or "",
                 serial_number=attributes.get("serial_number") or "",
                 account_id=sensor._account_id,
