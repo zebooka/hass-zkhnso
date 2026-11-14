@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
@@ -51,14 +52,20 @@ async def async_setup_entry(
             if device is not None and company is not None and device.manufacturer != company:
                 device_registry.async_update_device(device.id, manufacturer=company)
 
-            for kind, cls in (("meters", ZKHMeterSensor), ("tariffs", ZKHTariffSensor)):
-                items = account.get(kind)
-                if not isinstance(items, dict):
-                    continue
-                for key, value in items.items():
-                    identity = (account_id, kind, key)
-                    if identity not in known and isinstance(value, dict):
-                        entities.append(cls(coordinator, key, value, account_id))
+            if isinstance(meters := account.get("meters"), dict):
+                for meter in meters.values():
+                    if not isinstance(meter, dict) or "serial_number" not in meter:
+                        continue
+                    identity = (account_id, "meters", meter["serial_number"])
+                    if identity not in known:
+                        entities.append(ZKHMeterSensor(coordinator, meter, account_id))
+                        known.add(identity)
+
+            if isinstance(tariffs := account.get("tariffs"), dict):
+                for key, tariff in tariffs.items():
+                    identity = (account_id, "tariffs", key)
+                    if identity not in known and isinstance(tariff, dict):
+                        entities.append(ZKHTariffSensor(coordinator, key, tariff, account_id))
                         known.add(identity)
 
             if account.get("tariffs") and (account_id, "combined", "water") not in known:
@@ -146,16 +153,16 @@ class ZKHMeterSensor(ZKHSensor):
     def __init__(
         self,
         coordinator: ZKHDataUpdateCoordinator,
-        key: str,
         meter: dict,
         account_id: str,
     ) -> None:
         super().__init__(coordinator, account_id)
-        self._meter_key = key
+        self._serial_number = str(meter["serial_number"])
+        key = self.sanitize_serial_number(self._serial_number)
         self._attr_unique_id = f"{self._id_prefix}_meter_{key}"
         self._attr_translation_placeholders = {
-            "name": str(meter.get("name", key)),
-            "serial_number": str(meter.get("serial_number")),
+            "name": str(meter.get("name", self._serial_number)),
+            "serial_number": str(self._serial_number),
         }
         self._attr_entity_registry_enabled_default = not meter.get("is_archived", False)
 
@@ -176,6 +183,11 @@ class ZKHMeterSensor(ZKHSensor):
             self._attr_device_class = SensorDeviceClass.ENERGY
             self._attr_native_unit_of_measurement = UnitOfEnergy.GIGA_CALORIE
 
+    @staticmethod
+    def sanitize_serial_number(serial: str):
+        """Sanitize serial number for use as key (replace non-digits with underscore)."""
+        return re.sub(r"[^0-9]", "_", serial)
+
     async def async_added_to_hass(self) -> None:
         """Check the meter on setup and subscribe to coordinator updates."""
         await super().async_added_to_hass()
@@ -192,7 +204,7 @@ class ZKHMeterSensor(ZKHSensor):
     @property
     def _meter(self) -> dict | None:
         account = self._account
-        return account.get("meters", {}).get(self._meter_key) or None if isinstance(account, dict) else None
+        return account.get("meters", {}).get(self._serial_number) if isinstance(account, dict) else None
 
     @property
     def icon(self) -> str:

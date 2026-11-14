@@ -52,7 +52,7 @@ def meter_sensor(days=29, *, account="42", key="123", archived=False):
         entry=SimpleNamespace(entry_id="entry"),
         data={"accounts": {account: {"address": "Private address", "meters": {key: meter}}}},
     )
-    sensor = ZKHMeterSensor(coordinator, key, meter, account)
+    sensor = ZKHMeterSensor(coordinator, meter, account)
     sensor.entity_id = f"sensor.meter_{account}_{key}"
     return sensor, meter
 
@@ -183,7 +183,7 @@ def test_retry_after_save_failure(monkeypatch, notification_dependencies):
 
 @pytest.mark.parametrize("language,title,message", [
     ("ru", "Приближается поверка счётчика", "Вода №123, ЛС: №42: поверка 11.12.2026"),
-    ("en", "Meter verification is approaching", "Вода #123, account #42: verification on 11.12.2026"),
+    ("en", "Meter verification is approaching", "Вода #123, Acct.No. #42: verification on 11.12.2026"),
 ])
 def test_real_home_assistant_translation_and_notification(monkeypatch, language, title, message):
     async def run():

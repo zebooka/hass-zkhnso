@@ -230,9 +230,9 @@ def test_process_meters_supports_both_counter_row_formats() -> None:
     )
 
     assert result["26_16185541"]["next_verification_date"] == "2028-06-02"
-    assert result["22_157073"]["next_verification_date"] == "2028-06-02"
+    assert result["22-157073"]["next_verification_date"] == "2028-06-02"
     assert result["26_16185541"]["zkhnso_id"] == "first:1"
-    assert result["22_157073"]["zkhnso_id"] is None
+    assert result["22-157073"]["zkhnso_id"] is None
 
 
 def test_get_meters_parses_active_and_archived_tables() -> None:
@@ -256,15 +256,15 @@ def test_get_meters_parses_active_and_archived_tables() -> None:
     '''
     client._get_page = AsyncMock(side_effect=[active_html, archived_html])
     assert asyncio.run(client.get_active_meters()) == {
-        "22_123": {"name": "Вода", "serial_number": "22-123", "unit": "куб.м.",
+        "22-123": {"name": "Вода", "serial_number": "22-123", "unit": "куб.м.",
                    "date": "2026-01-01", "value": 12.34, "next_verification_date": "2030-01-02", "is_archived": False, "zkhnso_id": None},
-        "22_124": {"name": "Вода", "serial_number": "22-124", "unit": "куб.м.",
+        "22-124": {"name": "Вода", "serial_number": "22-124", "unit": "куб.м.",
                    "date": "2026-01-02", "value": 12.34, "next_verification_date": "2030-01-02", "is_archived": False, "zkhnso_id": None},
-        "22_125": {"name": "Вода", "serial_number": "22-125", "unit": "куб.м.",
+        "22-125": {"name": "Вода", "serial_number": "22-125", "unit": "куб.м.",
                    "date": "2026-01-03", "value": 12.34, "next_verification_date": "2030-01-02", "is_archived": False, "zkhnso_id": "1234:1"},
     }
     assert asyncio.run(client.get_archived_meters()) == {
-        "22_456": {"name": "Вода", "serial_number": "22-456", "unit": "куб.м.",
+        "22-456": {"name": "Вода", "serial_number": "22-456", "unit": "куб.м.",
                    "date": "2025-02-02", "value": 193.0, "next_verification_date": "2029-03-03", "is_archived": True},
     }
     assert client._get_page.await_args_list == [
@@ -362,9 +362,9 @@ def portal_meters(portal_counters_form) -> dict:
 
 def test_get_meters_with_portal_form(portal_meters) -> None:
     assert portal_meters == {
-        "22_157073": {"name": "гор.вода", "serial_number": "22-157073", "unit": "куб.м.",
+        "22-157073": {"name": "гор.вода", "serial_number": "22-157073", "unit": "куб.м.",
                       "date": "2026-10-25", "value": 172.0, "next_verification_date": "2028-06-02", "is_archived": False, "zkhnso_id": "146047636464:1"},
-        "22_171694": {"name": "хол.вода", "serial_number": "22-171694", "unit": "куб.м.",
+        "22-171694": {"name": "хол.вода", "serial_number": "22-171694", "unit": "куб.м.",
                       "date": "2026-10-25", "value": 532.0, "next_verification_date": "2028-06-02", "is_archived": False, "zkhnso_id": "145951290085:1"},
         "1016061717404": {"name": "хол.вода", "serial_number": "1016061717404", "unit": "куб.м.",
                           "date": "2022-10-04", "value": 681.0, "next_verification_date": "2022-10-05", "is_archived": True},
@@ -526,7 +526,6 @@ def test_api_client_parsing_helpers() -> None:
     assert client._parse_float("invalid") is None
     assert client._parse_date("31.12.2026") == "2026-12-31"
     assert client._parse_date("invalid") is None
-    assert client._sanitize_serial_number("AB-12/34") == "___12_34"
     assert client._extract_jsessionid(
         CIMultiDict({"Set-Cookie": "JSESSIONID=session; Path=/"})
     ) == "session"

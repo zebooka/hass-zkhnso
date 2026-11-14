@@ -75,7 +75,7 @@ def test_sensor_names_and_object_ids_use_entity_translations(language) -> None:
 
     coordinator = SimpleNamespace(entry=SimpleNamespace(entry_id="entry", data={}),
                                   data={"accounts": {"43": {"address": "Адрес 2"}}})
-    meter = ZKHMeterSensor(coordinator, "222", {"name": "Газ", "serial_number": "222", "unit": "куб.м."}, "43")
+    meter = ZKHMeterSensor(coordinator, {"name": "Газ", "serial_number": "222", "unit": "куб.м."}, "43")
     tariff = ZKHTariffSensor(coordinator, "ГАЗ", {"name": "ГАЗ", "unit": "куб.м."}, "43")
     combined = ZKHCombinedColdWaterTariffSensor(coordinator, "43")
     formula = ZKHCombinedTariffFormulaSensor(combined)
@@ -102,7 +102,7 @@ def test_meter_and_company_attribute_names_are_translated(language) -> None:
     meter_data = {"name": "Газ", "serial_number": "222", "unit": "куб.м.", "value": 5}
     account = {"meters": {"222": meter_data}, "company": {"name": "УК", "address": "Адрес УК"}}
     coordinator = SimpleNamespace(entry=SimpleNamespace(entry_id="entry"), data={"accounts": {"43": account}})
-    meter = ZKHMeterSensor(coordinator, "222", meter_data, "43")
+    meter = ZKHMeterSensor(coordinator, meter_data, "43")
     company = ZKHCompanySensor(coordinator, "43")
     for entity in (meter, company):
         entity.platform = SimpleNamespace(platform_name="zkhnso", domain="sensor",

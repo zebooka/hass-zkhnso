@@ -71,7 +71,7 @@ class MeterVerificationAlerts:
                     "entry_id": self.entry_id,
                     "entity_id": sensor.entity_id,
                     "account_id": sensor._account_id,
-                    "meter_id": sensor._meter_key,
+                    "meter_id": sensor._serial_number,
                     "serial_number": attributes.get("serial_number"),
                     "name": attributes.get("meter_name"),
                     "next_verification_date": verification_date.isoformat(),

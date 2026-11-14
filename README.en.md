@@ -89,6 +89,24 @@ automation:
               interruption-level: time-sensitive
 ```
 
+### Meter reading submission event
+
+The `zkhnso_send_meters` event accepts a string `account_id` and a list of readings in `meters` for that account. Each item must have `serial_number` and `value`; the optional `date` must be a string in `YYYY-MM-DD` format. The serial number must match the meter in the integration exactly. Example automation action:
+
+```yaml
+- event: zkhnso_send_meters
+  event_data:
+    account_id: "123456"
+    meters:
+      - serial_number: "123-45"
+        value: 42.5
+        date: "2026-11-13"
+```
+
+The integration checks that the meter belongs to the account, is active, and allows submissions. Rejected readings and errors are logged. Each event is for one account; if an account appears in multiple integration entries, its readings are skipped to avoid duplicate submissions. Data used for validation is refreshed hourly.
+
+**Important:** `post_meters` is currently a stub and does not send readings to ZKHNSO.
+
 ## Calculating meter costs
 
 To calculate water costs in the **Energy** dashboard, combined tariffs are required because water costs are calculated using several tariffs. Configure combined tariffs in the integration options.

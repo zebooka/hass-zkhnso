@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import logging
-import re
 from collections import Counter
 from datetime import datetime
 from typing import Any
@@ -330,6 +329,9 @@ class ZKHAPIClient:
         rows = await self._get_page_cells_text(url, "#tariffsForm table tr", "Tariffs")
         return self._process_tariffs_data(rows) if rows else None
 
+    async def post_meters(self, payload: dict[str, Any]) -> None:
+        return
+
     def _parse_float(self, value_str: str) -> float | None:
         """Extract and parse float value from string."""
         if not value_str:
@@ -349,10 +351,6 @@ class ZKHAPIClient:
             _LOGGER.warning("Failed to parse date '%s': %s", date_str, e)
             return None
 
-    def _sanitize_serial_number(self, serial: str) -> str:
-        """Sanitize serial number for use as key (replace non-digits with underscore)."""
-        return re.sub(r"[^0-9]", "_", serial)
-
     def _process_active_meters_data(self, rows: list[list[str]], zkhnso_ids: list[str | None]) -> dict[str, Any]:
         """Process table rows into meters data structure."""
         if not rows or len(rows) < 2 or (len(rows) == 2 and len(rows[1]) == 1):
@@ -367,10 +365,10 @@ class ZKHAPIClient:
                 continue
 
             try:
-                key = self._sanitize_serial_number(row[1].strip())
+                serial_number = row[1].strip()
                 meter = {
                     "name": row[0].strip(),
-                    "serial_number": row[1].strip(),
+                    "serial_number": serial_number,
                     "unit": row[2].strip(),
                     "date": self._parse_date(row[3].strip()),
                     "value": self._parse_float(row[4].strip()),
@@ -378,10 +376,8 @@ class ZKHAPIClient:
                     "is_archived": False,
                     "zkhnso_id": zkhnso_id,
                 }
-
-                _LOGGER.debug("Meter %s: %s", key, meter)
-                meters[key] = meter
-
+                _LOGGER.debug("Meter %s: %s", serial_number, meter)
+                meters[serial_number] = meter
             except (IndexError, AttributeError) as e:
                 _LOGGER.warning("Error processing meter row %s: %s", row, e)
                 continue
@@ -402,10 +398,10 @@ class ZKHAPIClient:
                 continue
 
             try:
-                key = self._sanitize_serial_number(row[1].strip())
+                serial_number = row[1].strip()
                 meter = {
                     "name": row[0].strip(),
-                    "serial_number": row[1].strip(),
+                    "serial_number": serial_number,
                     "unit": row[2].strip(),
                     "date": self._parse_date(row[3].strip()),
                     "value": self._parse_float(row[4].strip()),
@@ -413,8 +409,8 @@ class ZKHAPIClient:
                     "is_archived": True,
                 }
 
-                _LOGGER.debug("Archive meter %s: %s", key, meter)
-                meters[key] = meter
+                _LOGGER.debug("Archive meter %s: %s", serial_number, meter)
+                meters[serial_number] = meter
 
             except (IndexError, AttributeError) as e:
                 _LOGGER.warning("Error processing archive meter row %s: %s", row, e)

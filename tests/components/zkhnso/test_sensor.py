@@ -59,7 +59,7 @@ def device_registry(monkeypatch):
 
 def test_entry_sensors_share_account_device(device_registry) -> None:
     """Meters and tariff sensors use the account-specific device and IDs."""
-    meter = {"name": "Вода", "unit": "куб.м.", "value": 12.5}
+    meter = {"name": "Вода", "serial_number": "1", "unit": "куб.м.", "value": 12.5}
     tariff = {"name": "Water", "unit": "куб.м.", "rate_per_unit": 10}
     coordinator = _coordinator({"meters": {"1": meter}, "tariffs": {"water": tariff}})
     entry = SimpleNamespace(entry_id="entry", runtime_data=coordinator, options={})
@@ -100,7 +100,7 @@ def test_different_entries_have_separate_devices() -> None:
 
 def test_multiple_accounts_are_isolated_and_new_accounts_are_discovered(device_registry) -> None:
     def account(address, reading, rate):
-        return {"address": address, "meters": {"1": {"name": "Вода", "unit": "куб.м.", "value": reading}},
+        return {"address": address, "meters": {"1": {"name": "Вода", "serial_number": "1", "unit": "куб.м.", "value": reading}},
                 "tariffs": {"water": {"name": "Water", "unit": "куб.м.", "rate_per_unit": rate}}}
 
     coordinator = _coordinator({"accounts": {"42": account("Адрес 1", 10, 20), "43": account("Адрес 2", 30, 40)}})
@@ -226,7 +226,7 @@ def test_selected_tariffs_override_other_available_choices() -> None:
 
 def test_leading_zeroes_preserved_in_account_ids() -> None:
     coordinator = _coordinator({"accounts": {"0042": {"address": "Адрес", "meters": {}}}})
-    sensor = ZKHMeterSensor(coordinator, "1", {}, "0042")
+    sensor = ZKHMeterSensor(coordinator, {"serial_number": "1"}, "0042")
     assert sensor.unique_id == "entry_account_0042_meter_1"
     assert sensor.device_info["identifiers"] == {("zkhnso", "entry_account_0042")}
 
@@ -255,9 +255,9 @@ def test_device_name_reflects_updated_account_details() -> None:
 
 def test_meter_uses_current_coordinator_data_and_clears_removed_meter() -> None:
     """Meters do not retain stale readings after a successful refresh."""
-    data = {"meters": {"1": {"name": "Вода", "unit": "куб.м.", "value": 12.5}}}
+    data = {"meters": {"1": {"name": "Вода", "serial_number": "1", "unit": "куб.м.", "value": 12.5}}}
     coordinator = _coordinator(data)
-    sensor = ZKHMeterSensor(coordinator, "1", data["meters"]["1"], "42")
+    sensor = ZKHMeterSensor(coordinator, data["meters"]["1"], "42")
 
     assert sensor.native_value == 12.5
     assert sensor.device_class == SensorDeviceClass.WATER
@@ -273,7 +273,7 @@ def test_meter_archive_default_and_icon_follow_coordinator(is_archived) -> None:
     meter = {"name": "Вода", "serial_number": "1", "unit": "куб.м.", "value": 12.5,
              "is_archived": is_archived}
     coordinator = _coordinator({"meters": {"1": meter}})
-    sensor = ZKHMeterSensor(coordinator, "1", meter, "42")
+    sensor = ZKHMeterSensor(coordinator, meter, "42")
     assert sensor.unique_id == "entry_account_42_meter_1"
     assert sensor.entity_registry_enabled_default is (not is_archived)
     assert sensor.icon == ("mdi:card-remove-outline" if is_archived else "mdi:counter")
@@ -292,8 +292,8 @@ def test_meter_device_classes() -> None:
         ("Тепло", "Гкал", SensorDeviceClass.ENERGY, UnitOfEnergy.GIGA_CALORIE),
     ]
     for index, (name, unit, device_class, native_unit) in enumerate(cases):
-        meter = {"name": name, "unit": unit, "value": 1}
-        sensor = ZKHMeterSensor(_coordinator({"meters": {str(index): meter}}), str(index), meter, "42")
+        meter = {"name": name, "serial_number": str(index), "unit": unit, "value": 1}
+        sensor = ZKHMeterSensor(_coordinator({"meters": {str(index): meter}}), meter, "42")
         assert sensor.device_class == device_class
         assert sensor.native_unit_of_measurement == native_unit
 

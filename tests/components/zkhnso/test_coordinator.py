@@ -141,10 +141,10 @@ def test_http_session_fetches_distinct_accounts_and_creates_sensors(monkeypatch)
             monkeypatch.setattr("custom_components.zkhnso.sensor.async_get_device_registry", lambda _: SimpleNamespace(async_get_device=lambda **_: None))
             await async_setup_entry(None, SimpleNamespace(entry_id="entry", runtime_data=coordinator, options={}, async_on_unload=MagicMock()), added)
             entities = added.call_args.args[0]
-            meters = {(e._account_id, e._meter_key): e.native_value for e in entities if isinstance(e, ZKHMeterSensor)}
+            meters = {(e._account_id, e._serial_number): e.native_value for e in entities if isinstance(e, ZKHMeterSensor)}
             tariffs_by_account = {(e._account_id, e._tariff_key): e.native_value for e in entities if isinstance(e, ZKHTariffSensor)}
             assert all(not e.entity_registry_enabled_default and e.icon == "mdi:card-remove-outline"
-                       for e in entities if isinstance(e, ZKHMeterSensor) and e._meter_key in ("333", "444"))
+                       for e in entities if isinstance(e, ZKHMeterSensor) and e._serial_number in ("333", "444"))
             assert tariffs_by_account == {('42', 'ВОДА'): 20, ('43', 'ГАЗ'): 40}
             assert requests == [
                 ('address', '42'),
