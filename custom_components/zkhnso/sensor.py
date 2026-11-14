@@ -221,7 +221,7 @@ class ZKHMeterSensor(ZKHSensor):
         if meter is None:
             return {}
 
-        return {
+        attrs = {
             "name": self.name if self.platform else self._attr_translation_placeholders["name"],
             "meter_name": meter.get("name"),
             "serial_number": meter.get("serial_number"),
@@ -230,6 +230,10 @@ class ZKHMeterSensor(ZKHSensor):
             "next_verification_date": meter.get("next_verification_date"),
             "is_archived": bool(meter.get("is_archived", False)),
         }
+        if meter.get("zkhnso_id"):
+            attrs["zkhnso_id"] = meter.get("zkhnso_id")
+
+        return attrs
 
 
 class ZKHTariffSensor(ZKHSensor):

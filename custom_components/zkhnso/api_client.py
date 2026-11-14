@@ -315,7 +315,7 @@ class ZKHAPIClient:
         rows = await self._get_page_rows(url, "#countersForm table tr", "Meters")
         return self._process_active_meters_data(
             [[extract_cell_text(cell) for cell in row] for row in extract_table_cells_from_rows(rows)],
-            [input.get("value") if (input := row.select_one("input[name^='counterCode[']")) else None for row in rows]
+            [input.attrs.get("value") if (input := row.select_one('input[name^="counterCode["]')) else None for row in rows]
         ) if rows else None
 
     async def get_archived_meters(self) -> dict[str, Any] | None:
@@ -340,6 +340,7 @@ class ZKHAPIClient:
                 headers={"Content-Type": "application/x-www-form-urlencoded"},
                 allow_redirects=False,
             ) as response:
+                _LOGGER.debug("Meter readings POST %s: %s code: %s", response.url, response.status, await response.text())
                 if response.status >= 400:
                     raise ZKHAPIConnectionError(f"Meter submission failed with HTTP status {response.status}")
         except (aiohttp.ClientError, TimeoutError) as err:

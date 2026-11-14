@@ -28,7 +28,7 @@ class MeterSubmission:
     async def async_handle_event(self, event: Event) -> None:
         account_id = event.data.get("account_id")
         readings = event.data.get("meters")
-        if not isinstance(account_id, str) or not account_id.strip() or not isinstance(readings, list) or not readings:
+        if not account_id or not str(account_id).strip() or not isinstance(readings, list) or not readings:
             _LOGGER.error("Meters submission requires account_id and meters in event data")
             return
 
@@ -75,7 +75,7 @@ class MeterSubmission:
                 _LOGGER.warning(e)
 
         if not payload or self.coordinators.get(entry_id) is not coordinator:
-            _LOGGER.error("Nothing to send or no coordinator for entry %s found", entry_id)
+            _LOGGER.error("No meters to send or no coordinator for entry %s found", entry_id)
             return
 
         try:
