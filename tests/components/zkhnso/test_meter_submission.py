@@ -18,6 +18,7 @@ class Client:
         self.accounts = {"42": None, "43": None}
         self.preflight = AsyncMock(return_value=True)
         self.login = AsyncMock(return_value=True)
+        self.get_active_meters = AsyncMock(return_value={})
         self.post_meters = AsyncMock()
         self.change_account = AsyncMock(side_effect=self.switch)
 
@@ -50,6 +51,7 @@ def test_mixed_readings_are_filtered_for_event_account(monkeypatch):
 
         def create(*args):
             client = Client(*args)
+            client.get_active_meters.return_value = account(meter("A-1"), meter("blocked", code=None))["meters"]
             clients.append(client)
             return client
 
@@ -83,9 +85,47 @@ def test_mixed_readings_are_filtered_for_event_account(monkeypatch):
     asyncio.run(run())
 
 
+def test_submission_uses_fresh_meters_and_previous_value(monkeypatch):
+    async def run():
+        client = Client("user", "password")
+        client.get_active_meters.return_value = {
+            "fresh": {"serial_number": "fresh", "zkhnso_id": "fresh:1", "value": 8},
+            "blocked": {"serial_number": "blocked", "zkhnso_id": None, "value": 1},
+        }
+        monkeypatch.setattr(submission, "ZKHAPIClient", lambda *args: client)
+        manager = submission.MeterSubmission(SimpleNamespace(bus=SimpleNamespace(async_listen=MagicMock())))
+        manager.coordinators["first"] = coordinator("first", {"42": account(
+            meter("old"), meter("blocked"), meter("fresh", code="stale:1"),
+        )})
+        await manager.async_handle_event(SimpleNamespace(data={"account_id": "42", "meters": [
+            {"serial_number": "old", "value": 1},
+            {"serial_number": "blocked", "value": 2},
+            {"serial_number": "fresh", "value": 9, "date": "2026-02-28"},
+        ]}))
+        client.get_active_meters.assert_awaited_once()
+        client.post_meters.assert_awaited_once_with({
+            "counterCode[0]": "fresh:1", "counterDate[0]": "28.02.2026",
+            "counterValue[0]": 9.0, "counterDiff[0]": 1.0,
+        })
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("result", [None, {}])
+def test_empty_or_failed_active_meter_fetch_does_not_post(monkeypatch, result):
+    async def run():
+        client = Client("user", "password")
+        client.get_active_meters.return_value = result
+        monkeypatch.setattr(submission, "ZKHAPIClient", lambda *args: client)
+        manager = submission.MeterSubmission(SimpleNamespace(bus=SimpleNamespace(async_listen=MagicMock())))
+        manager.coordinators["first"] = coordinator("first", {"42": account(meter("123"))})
+        await manager.async_handle_event(SimpleNamespace(data={"account_id": "42", "meters": [{"serial_number": "123", "value": 1}]}))
+        client.get_active_meters.assert_awaited_once()
+        client.post_meters.assert_not_awaited()
+    asyncio.run(run())
+
+
 @pytest.mark.parametrize("payload", [
     None, {}, {"account_id": "42", "meters": {}}, {"account_id": "42", "meters": []},
-    {"account_id": "42", "meters": [{"value": 1}]},
     {"meters": [{"account_id": "42", "serial_number": "serial", "value": 1}]},
     {"account_id": "", "meters": [{"serial_number": "serial", "value": 1}]},
     {"account_id": 42, "meters": [{"serial_number": "serial", "value": 1}]},
@@ -110,14 +150,16 @@ def test_invalid_or_empty_payload_does_not_open_client(monkeypatch, payload):
     "not a reading",
     {"serial_number": "123", "value": "invalid"},
 ])
-def test_invalid_reading_is_rejected_without_opening_client(monkeypatch, reading):
+def test_invalid_reading_is_rejected_without_post(monkeypatch, reading):
     async def run():
-        factory = MagicMock()
-        monkeypatch.setattr(submission, "ZKHAPIClient", factory)
+        client = Client("user", "password")
+        client.get_active_meters.return_value = account(meter("123"))["meters"]
+        monkeypatch.setattr(submission, "ZKHAPIClient", lambda *args: client)
         manager = submission.MeterSubmission(SimpleNamespace(bus=SimpleNamespace(async_listen=MagicMock())))
         manager.coordinators["first"] = coordinator("first", {"42": account(meter("123"))})
         await manager.async_handle_event(SimpleNamespace(data={"account_id": "42", "meters": [reading]}))
-        factory.assert_not_called()
+        client.get_active_meters.assert_awaited_once()
+        client.post_meters.assert_not_awaited()
     asyncio.run(run())
 
 
@@ -127,6 +169,7 @@ def test_ambiguous_account_uses_first_entry(monkeypatch):
 
         def create(*args):
             client = Client(*args)
+            client.get_active_meters.return_value = account(meter("123"))["meters"]
             clients.append(client)
             return client
 
@@ -154,6 +197,10 @@ def test_account_routing_and_switch(monkeypatch, account_id, username, serial, c
         def create(*args):
             client = Client(*args)
             client.accounts["44"] = None
+            async def get_meters():
+                assert client.current_account_id == account_id
+                return account(meter(serial, code=code))["meters"]
+            client.get_active_meters.side_effect = get_meters
             clients.append(client)
             return client
 
@@ -192,6 +239,7 @@ def test_session_failures_do_not_post(monkeypatch, failure):
             client.login.assert_awaited_once()
         if failure == "switch":
             client.change_account.assert_awaited_once_with("43")
+        client.get_active_meters.assert_not_awaited()
         client.post_meters.assert_not_awaited()
     asyncio.run(run())
 
@@ -200,6 +248,7 @@ def test_event_bus_listener_and_unload(monkeypatch):
     async def run():
         hass = HomeAssistant("/config")
         client = Client("user", "password")
+        client.get_active_meters.return_value = account(meter("123"))["meters"]
         monkeypatch.setattr(submission, "ZKHAPIClient", lambda *args: client)
         first = coordinator("first", {"42": account(meter("123"))})
         second = coordinator("second", {"43": account(meter("other"))})

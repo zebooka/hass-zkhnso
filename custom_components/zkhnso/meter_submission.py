@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from datetime import date
 import logging
-import re
 from typing import Any
 
 from homeassistant.core import Event, HomeAssistant, callback
@@ -44,7 +43,32 @@ class MeterSubmission:
             _LOGGER.warning("Account %s belongs to multiple integration entries; submitting only for the first one", account_id)
 
         entry_id, coordinator = owners[0]
-        meters = coordinator.data["accounts"][account_id].get("meters", {})
+        try:
+            async with ZKHAPIClient(coordinator.entry.data[CONF_USERNAME], coordinator.entry.data[CONF_PASSWORD]) as client:
+                if not await client.preflight() or not await client.login():
+                    _LOGGER.error("Unable to authenticate for meter submission to account %s", account_id)
+                    return
+                if account_id not in client.accounts:
+                    _LOGGER.error("Account %s is no longer available for meter submission", account_id)
+                    return
+                if client.current_account_id != account_id:
+                    await client.change_account(account_id)
+                meters = await client.get_active_meters()
+                if meters is None:
+                    _LOGGER.error("Unable to fetch active meters for account %s", account_id)
+                    return
+                payload = self._prepare_payload(account_id, readings, meters)
+                if not payload or self.coordinators.get(entry_id) is not coordinator:
+                    _LOGGER.error("No meters to send or no coordinator for entry %s found", entry_id)
+                    return
+                await client.post_meters(payload)
+        except Exception:
+            _LOGGER.exception("Unable to submit meter readings for account %s", account_id)
+
+    def _prepare_payload(
+        self, account_id: str, readings: list[Any], meters: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Validate readings using freshly fetched active meter data."""
         payload = {}
         i = 0
         for reading in readings:
@@ -54,9 +78,7 @@ class MeterSubmission:
                 serial_number = reading["serial_number"]
                 value = float(reading["value"])
                 if (meter := meters.get(reading["serial_number"])) is None:
-                    raise LookupError(f"Meter {serial_number} not found in account {account_id}")
-                if meter.get("is_archived"):
-                    raise ValueError(f"Meter {serial_number} in account {account_id} is inactive")
+                    raise LookupError(f"Active meter {serial_number} not found in account {account_id}")
                 if not meter.get("zkhnso_id"):
                     raise ValueError(f"Meter {serial_number} in account {account_id} has readings submission blocked")
                 old_value = float(meter.get("value", 0))
@@ -74,23 +96,7 @@ class MeterSubmission:
             except (KeyError, LookupError, ValueError) as e:
                 _LOGGER.warning(e)
 
-        if not payload or self.coordinators.get(entry_id) is not coordinator:
-            _LOGGER.error("No meters to send or no coordinator for entry %s found", entry_id)
-            return
-
-        try:
-            async with ZKHAPIClient(coordinator.entry.data[CONF_USERNAME], coordinator.entry.data[CONF_PASSWORD]) as client:
-                if not await client.preflight() or not await client.login():
-                    _LOGGER.error("Unable to authenticate for meter submission to account %s", account_id)
-                    return
-                if account_id not in client.accounts:
-                    _LOGGER.error("Account %s is no longer available for meter submission", account_id)
-                    return
-                if client.current_account_id != account_id:
-                    await client.change_account(account_id)
-                await client.post_meters(payload)
-        except Exception:
-            _LOGGER.exception("Unable to submit meter readings for account %s", account_id)
+        return payload
 
 
 @callback

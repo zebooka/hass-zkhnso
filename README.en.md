@@ -103,7 +103,7 @@ The `zkhnso_send_meters` event accepts a string `account_id` and a list of readi
         date: "2026-11-13"
 ```
 
-The integration checks that the meter belongs to the account, is active, and allows submissions. Rejected readings and errors are logged. Each event is for one account; if an account appears in multiple integration entries, its readings are skipped to avoid duplicate submissions. Data used for validation is refreshed hourly.
+Before submission, the integration fetches the current active meters for the selected account from the website and checks whether readings can be submitted. Rejected readings and errors are logged. Each event is for one account; if an account appears in multiple integration entries, the first entry is used.
 
 ## Calculating meter costs
 
