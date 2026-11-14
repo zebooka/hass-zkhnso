@@ -42,7 +42,7 @@ logo: ## Generate PNG logo assets from SVG (requires ImageMagick)
 	cp custom_components/zkhnso/brand/logo@2x.png custom_components/zkhnso/brand/icon@2x.png
 
 test: ## Run integration tests in the Home Assistant Docker image
-	docker exec $(HASS) python -m pytest -p no:cacheprovider /tests
+	docker exec $(HASS) python -m pytest --color=yes -p no:cacheprovider /tests
 
 version: ## Release current changelog: make version X.Y.Z
 	@test -n "$(VERSION)" || (echo "Usage: make version X.Y.Z"; exit 1)

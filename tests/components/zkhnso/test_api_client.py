@@ -428,7 +428,7 @@ def test_get_meters_with_portal_form(portal_meters) -> None:
     }
 
 
-@pytest.mark.xfail(strict=True, reason="Счётчики с одинаковым серийным номером перезаписывают друг друга")
+@pytest.mark.xfail(strict=True, reason="Счётчики с одинаковым серийным номером перезаписывают друг друга. Почему-то в моём ЛС встретились два счетчика с одним номером. Вероятно ошибка сантехника/оператора")
 def test_get_meters_preserves_archived_meters_with_duplicate_serial(portal_meters) -> None:
     duplicates = [meter for meter in portal_meters.values() if meter["serial_number"] == "1016061717404"]
     assert {(meter["name"], meter["value"], meter["date"], meter["next_verification_date"]) for meter in duplicates} == {
