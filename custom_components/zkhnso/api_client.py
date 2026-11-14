@@ -18,6 +18,7 @@ from .const import (
     API_URL_MAIN,
     API_URL_METERS,
     API_URL_ARCHIVED_METERS,
+    API_URL_METERS_SAVE,
     API_URL_TARIFFS,
     API_URL_PREFLIGHT,
     SESSION_FORM_TOKEN,
@@ -330,7 +331,19 @@ class ZKHAPIClient:
         return self._process_tariffs_data(rows) if rows else None
 
     async def post_meters(self, payload: dict[str, Any]) -> None:
-        return
+        """Submit meter readings using the current authenticated session."""
+        url = urljoin(API_BASE_URL, API_URL_METERS_SAVE)
+        try:
+            async with self._session.post(
+                url,
+                data=urlencode(payload, doseq=True),
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                allow_redirects=False,
+            ) as response:
+                if response.status >= 400:
+                    raise ZKHAPIConnectionError(f"Meter submission failed with HTTP status {response.status}")
+        except (aiohttp.ClientError, TimeoutError) as err:
+            raise ZKHAPIConnectionError("Failed to connect to ZKHNSO during meter submission") from err
 
     def _parse_float(self, value_str: str) -> float | None:
         """Extract and parse float value from string."""

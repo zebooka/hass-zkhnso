@@ -105,8 +105,6 @@ The `zkhnso_send_meters` event accepts a string `account_id` and a list of readi
 
 The integration checks that the meter belongs to the account, is active, and allows submissions. Rejected readings and errors are logged. Each event is for one account; if an account appears in multiple integration entries, its readings are skipped to avoid duplicate submissions. Data used for validation is refreshed hourly.
 
-**Important:** `post_meters` is currently a stub and does not send readings to ZKHNSO.
-
 ## Calculating meter costs
 
 To calculate water costs in the **Energy** dashboard, combined tariffs are required because water costs are calculated using several tariffs. Configure combined tariffs in the integration options.

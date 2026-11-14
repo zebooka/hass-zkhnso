@@ -113,6 +113,59 @@ def test_change_account_requires_non_error_status_code(status, success) -> None:
     assert kwargs["allow_redirects"] is False
 
 
+@pytest.mark.parametrize("status", [200, 201, 204, 302, 399, 400, 401, 429, 500, 503])
+def test_post_meters_sends_encoded_form_and_checks_status(monkeypatch, status) -> None:
+    """Use the live HTTP session and preserve the initial response status."""
+    import custom_components.zkhnso.api_client as api_client
+
+    async def run():
+        requests = []
+
+        async def save(request):
+            requests.append((request.path, request.content_type, await request.text(), dict(request.cookies)))
+            return web.Response(status=status, headers={"Location": "/redirected"} if status == 302 else {})
+
+        app = web.Application()
+        app.router.add_post("/room/lk/counters!save.action", save)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, "127.0.0.1", 0)
+        await site.start()
+        try:
+            port = site._server.sockets[0].getsockname()[1]
+            base_url = f"http://localhost:{port}/room/lk/"
+            monkeypatch.setattr(api_client, "API_BASE_URL", base_url)
+            payload = {"counterCode[0]": "код:1", "counterDate[0]": "14.11.2026", "counterValue[0]": 12.5}
+            async with ZKHAPIClient("user", "password") as client:
+                from yarl import URL
+                client.session.cookie_jar.update_cookies({"JSESSIONID": "session"}, response_url=URL(base_url))
+                if status >= 400:
+                    with pytest.raises(ZKHAPIConnectionError, match=f"HTTP status {status}"):
+                        await client.post_meters(payload)
+                else:
+                    assert await client.post_meters(payload) is None
+            from urllib.parse import parse_qs
+            assert len(requests) == 1
+            path, content_type, body, cookies = requests[0]
+            assert path == "/room/lk/counters!save.action"
+            assert content_type == "application/x-www-form-urlencoded"
+            assert parse_qs(body) == {"counterCode[0]": ["код:1"], "counterDate[0]": ["14.11.2026"], "counterValue[0]": ["12.5"]}
+            assert cookies["JSESSIONID"] == "session"
+        finally:
+            await runner.cleanup()
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("error", [aiohttp.ClientConnectionError("offline"), TimeoutError("timeout")])
+def test_post_meters_wraps_network_errors(error):
+    client = ZKHAPIClient("user", "password")
+    client.session = SimpleNamespace(post=MagicMock(side_effect=error))
+    with pytest.raises(ZKHAPIConnectionError) as exc_info:
+        asyncio.run(client.post_meters({"counterValue[0]": 1}))
+    assert exc_info.value.__cause__ is error
+
+
 def test_account_numbers_keep_leading_zeroes() -> None:
     client = _login_client(body="""
         <div class="header"><div class="account"><span>0042</span>
