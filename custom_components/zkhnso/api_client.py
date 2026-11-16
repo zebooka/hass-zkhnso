@@ -390,8 +390,18 @@ class ZKHAPIClient:
                     "is_archived": False,
                     "zkhnso_id": zkhnso_id,
                 }
-                _LOGGER.debug("Meter %s: %s", serial_number, meter)
-                meters[serial_number] = meter
+
+                if serial_number not in meters:
+                    meters[serial_number] = meter
+                    _LOGGER.debug("Meter %s: %s", serial_number, meter)
+                else:
+                    i = 2
+                    while (duplicate := f"{serial_number}:{i}") in meters:
+                        i += 1
+                        meters[duplicate] = meter
+                    meter["serial_number"] = duplicate
+                    meters[duplicate] = meter
+                    _LOGGER.debug("Duplicate meter %s: %s", duplicate, meter)
             except (IndexError, AttributeError) as e:
                 _LOGGER.warning("Error processing meter row %s: %s", row, e)
                 continue
@@ -423,9 +433,17 @@ class ZKHAPIClient:
                     "is_archived": True,
                 }
 
-                _LOGGER.debug("Archive meter %s: %s", serial_number, meter)
-                meters[serial_number] = meter
-
+                if serial_number not in meters:
+                    meters[serial_number] = meter
+                    _LOGGER.debug("Archive meter %s: %s", serial_number, meter)
+                else:
+                    i = 2
+                    while (duplicate := f"{serial_number}:{i}") in meters:
+                        i += 1
+                        meters[duplicate] = meter
+                    meter["serial_number"] = duplicate
+                    meters[duplicate] = meter
+                    _LOGGER.debug("Duplicate archive meter %s: %s", duplicate, meter)
             except (IndexError, AttributeError) as e:
                 _LOGGER.warning("Error processing archive meter row %s: %s", row, e)
                 continue

@@ -419,7 +419,9 @@ def test_get_meters_with_portal_form(portal_meters) -> None:
                       "date": "2026-10-25", "value": 172.0, "next_verification_date": "2028-06-02", "is_archived": False, "zkhnso_id": "146047636464:1"},
         "22-171694": {"name": "хол.вода", "serial_number": "22-171694", "unit": "куб.м.",
                       "date": "2026-10-25", "value": 532.0, "next_verification_date": "2028-06-02", "is_archived": False, "zkhnso_id": "145951290085:1"},
-        "1016061717404": {"name": "хол.вода", "serial_number": "1016061717404", "unit": "куб.м.",
+        "1016061717404": {"name": "гор.вода", "serial_number": "1016061717404", "unit": "куб.м.",
+                          "date": "2022-10-05", "value": 193.0, "next_verification_date": "2022-10-06", "is_archived": True},
+        "1016061717404:2": {"name": "хол.вода", "serial_number": "1016061717404:2", "unit": "куб.м.",
                           "date": "2022-10-04", "value": 681.0, "next_verification_date": "2022-10-05", "is_archived": True},
         "1010122602500": {"name": "гор.вода", "serial_number": "1010122602500", "unit": "куб.м.",
                           "date": "2017-02-01", "value": 326.0, "next_verification_date": "2017-02-04", "is_archived": True},
@@ -428,13 +430,16 @@ def test_get_meters_with_portal_form(portal_meters) -> None:
     }
 
 
-@pytest.mark.xfail(strict=True, reason="Счётчики с одинаковым серийным номером перезаписывают друг друга. Почему-то в моём ЛС встретились два счетчика с одним номером. Вероятно ошибка сантехника/оператора")
 def test_get_meters_preserves_archived_meters_with_duplicate_serial(portal_meters) -> None:
-    duplicates = [meter for meter in portal_meters.values() if meter["serial_number"] == "1016061717404"]
-    assert {(meter["name"], meter["value"], meter["date"], meter["next_verification_date"]) for meter in duplicates} == {
-        ("гор.вода", 193.0, "2022-10-05", "2022-10-06"),
-        ("хол.вода", 681.0, "2022-10-04", "2022-10-05"),
-    }
+    """Duplicate meters are retained with a suffix on the second serial number."""
+    first = portal_meters["1016061717404"]
+    second = portal_meters["1016061717404:2"]
+    assert (first["serial_number"], first["name"], first["value"], first["date"], first["next_verification_date"]) == (
+        "1016061717404", "гор.вода", 193.0, "2022-10-05", "2022-10-06",
+    )
+    assert (second["serial_number"], second["name"], second["value"], second["date"], second["next_verification_date"]) == (
+        "1016061717404:2", "хол.вода", 681.0, "2022-10-04", "2022-10-05",
+    )
 
 
 @pytest.mark.parametrize("html,expected", [
