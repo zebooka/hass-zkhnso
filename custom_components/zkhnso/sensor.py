@@ -208,7 +208,7 @@ class ZKHMeterSensor(ZKHSensor):
 
     @property
     def icon(self) -> str:
-        return "mdi:card-remove-outline" if (self._meter or {}).get("is_archived", False) else "mdi:counter"
+        return "mdi:card-off-outline" if (self._meter or {}).get("is_archived", False) else "mdi:counter"
 
     @property
     def native_value(self) -> float | None:
