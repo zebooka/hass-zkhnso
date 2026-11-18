@@ -203,10 +203,9 @@ class ZKHAPIClient:
                     _LOGGER.debug("Login response accepted")
                     return True
 
-                _LOGGER.warning(
-                    "Login was not accepted: status=%d, login_form=%s",
-                    response.status,
-                    self._is_login_page(html),
+                _LOGGER.error(
+                    "Login was not accepted: %s",
+                    html_to_str(html, "#loginForm .errorMessage"),
                 )
                 return False
 

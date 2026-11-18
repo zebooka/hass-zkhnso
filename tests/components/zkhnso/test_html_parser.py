@@ -15,6 +15,11 @@ HTML = """
 <section><h1 data-id="42"> Title </h1><ul><li>A</li><li>B</li></ul>
 <table id="data"><tr><th> Name </th><th> Value </th></tr>
 <tr><td>Meter <span>ignored</span></td><td> 12 </td></tr></table></section>
+
+<form id="loginForm" action="#" method="post">
+<ul class="errorMessage">
+<li><span>Неверно указан логин или пароль</span></li></ul>
+</form>
 """
 
 
@@ -28,11 +33,12 @@ def test_string_extraction() -> None:
     assert html_to_str(HTML, ".missing") is None
     assert html_to_str(HTML, "h1", attribute="missing") is None
     assert html_to_str("<p>  \n </p>", "p") is None
+    assert html_to_str(HTML, "#loginForm .errorMessage") == "Неверно указан логин или пароль"
 
 
 def test_multiple_extraction() -> None:
     """Multiple matches are available through the structured parser."""
-    assert html_to_json(HTML, {"selector": "li", "multiple": True}) == ["A", "B"]
+    assert html_to_json(HTML, {"selector": "li", "multiple": True}) == ["A", "B", "Неверно указан логин или пароль"]
     assert html_to_json(HTML, {"selector": ".missing", "multiple": True}) == []
 
 
