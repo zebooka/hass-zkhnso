@@ -359,7 +359,7 @@ class ZKHAPIClient:
     def _parse_date(self, date_str: str, format_in: str = "%d.%m.%Y") -> str | None:
         """Parse date string and convert to ISO format (YYYY-MM-DD)."""
         try:
-            return datetime.strptime(date_str.strip(), format_in).strftime("%Y-%m-%d")
+            return datetime.strptime(date_str.strip(), format_in).strftime("%Y-%m-%d") if date_str != "" else None
         except (ValueError, AttributeError) as e:
             _LOGGER.warning("Failed to parse date '%s': %s", date_str, e)
             return None
