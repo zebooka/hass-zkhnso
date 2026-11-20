@@ -252,7 +252,6 @@ def test_empty_or_failed_active_meter_fetch_does_not_post(monkeypatch, result):
     None, {}, {"account_id": "42", "meters": {}}, {"account_id": "42", "meters": []},
     {"meters": [{"account_id": "42", "serial_number": "serial", "value": 1}]},
     {"account_id": "", "meters": [{"serial_number": "serial", "value": 1}]},
-    {"account_id": 42, "meters": [{"serial_number": "serial", "value": 1}]},
     {"account_id": "99", "meters": [{"serial_number": "serial", "value": 1}]},
 ])
 def test_invalid_or_empty_payload_does_not_open_client(monkeypatch, payload):
@@ -263,6 +262,28 @@ def test_invalid_or_empty_payload_does_not_open_client(monkeypatch, payload):
         manager.coordinators["first"] = coordinator("first", {"42": account(meter("serial"))})
         await manager.async_handle_event(SimpleNamespace(data=payload or {}))
         factory.assert_not_called()
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("input_account,expected_account", [
+    (42, "42"), (" 42 ", "42"), (" 0042 ", "0042"),
+])
+def test_account_id_is_normalized_before_lookup(monkeypatch, input_account, expected_account):
+    async def run():
+        client = Client("user", "password")
+        client.current_account_id = expected_account
+        client.accounts = {expected_account: None}
+        client.get_active_meters.return_value = account(meter("serial"))["meters"]
+        monkeypatch.setattr(submission, "ZKHAPIClient", lambda *args: client)
+        manager = submission.MeterSubmission(SimpleNamespace(bus=SimpleNamespace(async_listen=MagicMock())))
+        coord = coordinator("first", {expected_account: account(meter("serial"))})
+        manager.coordinators["first"] = coord
+        await manager.async_handle_event(SimpleNamespace(data={
+            "account_id": input_account, "meters": [{"serial_number": "serial", "value": 1}],
+        }))
+        client.post_meters.assert_awaited_once()
+        client.change_account.assert_not_awaited()
+        coord.async_request_refresh.assert_awaited_once()
     asyncio.run(run())
 
 

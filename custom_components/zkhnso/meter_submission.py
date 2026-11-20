@@ -25,9 +25,9 @@ class MeterSubmission:
         self.unsubscribe = hass.bus.async_listen(EVENT_SEND_METER, self.async_handle_event)
 
     async def async_handle_event(self, event: Event) -> None:
-        account_id = event.data.get("account_id")
+        account_id = str(event.data.get("account_id", '')).strip() or None
         readings = event.data.get("meters")
-        if not account_id or not str(account_id).strip() or not isinstance(readings, list) or not readings:
+        if not account_id or not isinstance(readings, list) or not readings:
             _LOGGER.error("Meters submission requires account_id and meters in event data")
             return
 
