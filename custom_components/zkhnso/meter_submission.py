@@ -64,6 +64,13 @@ class MeterSubmission:
                 await client.post_meters(payload)
         except Exception:
             _LOGGER.exception("Unable to submit meter readings for account %s", account_id)
+            return
+
+        if self.coordinators.get(entry_id) is coordinator:
+            try:
+                await coordinator.async_request_refresh()
+            except Exception:
+                _LOGGER.exception("Unable to refresh data after meter submission for account %s", account_id)
 
     def _prepare_payload(
         self, account_id: str, readings: list[Any], meters: dict[str, Any]

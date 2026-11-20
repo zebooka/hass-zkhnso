@@ -105,6 +105,8 @@ The `zkhnso_send_meters` event accepts a string `account_id` and a list of readi
 
 Before submission, the integration fetches the current active meters for the selected account from the website and checks whether readings can be submitted. Rejected readings and errors are logged. Each event is for one account; if an account appears in multiple integration entries, the first entry is used.
 
+After successful submission, a full coordinator refresh is requested for all accounts, meters and tariffs. Home Assistant may delay closely spaced refresh requests. A refresh failure does not mean that the readings were not submitted.
+
 ## Calculating meter costs
 
 To calculate water costs in the **Energy** dashboard, combined tariffs are required because water costs are calculated using several tariffs. Configure combined tariffs in the integration options.

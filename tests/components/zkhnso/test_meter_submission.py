@@ -4,10 +4,11 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 
 from custom_components.zkhnso import meter_submission as submission
 from custom_components.zkhnso.api_client import ZKHAPIConnectionError
+from custom_components.zkhnso.coordinator import ZKHDataUpdateCoordinator
 
 
 class Client:
@@ -19,6 +20,7 @@ class Client:
         self.preflight = AsyncMock(return_value=True)
         self.login = AsyncMock(return_value=True)
         self.get_active_meters = AsyncMock(return_value={})
+        self.get_archived_meters = AsyncMock(return_value={})
         self.post_meters = AsyncMock()
         self.change_account = AsyncMock(side_effect=self.switch)
 
@@ -34,7 +36,10 @@ class Client:
 
 def coordinator(entry_id, accounts):
     entry = SimpleNamespace(entry_id=entry_id, data={"username": entry_id, "password": "secret"}, async_on_unload=MagicMock())
-    return SimpleNamespace(entry=entry, data={"accounts": accounts})
+    coord = SimpleNamespace(entry=entry, data={"accounts": accounts})
+    coord.async_set_updated_data = MagicMock(side_effect=lambda data: setattr(coord, "data", data))
+    coord.async_request_refresh = AsyncMock()
+    return coord
 
 
 def account(*meters):
@@ -107,6 +112,125 @@ def test_submission_uses_fresh_meters_and_previous_value(monkeypatch):
             "counterCode[0]": "fresh:1", "counterDate[0]": "28.02.2026",
             "counterValue[0]": 9.0, "counterDiff[0]": 1.0,
         })
+    asyncio.run(run())
+
+
+def test_success_requests_refresh_after_post_and_session_close(monkeypatch):
+    async def run():
+        calls = []
+        client = Client("user", "password")
+        client.get_active_meters.return_value = account(meter("123"))["meters"]
+
+        async def post(payload):
+            calls.append("post")
+
+        class ManagedClient:
+            async def __aenter__(self):
+                return client
+
+            async def __aexit__(self, *args):
+                calls.append("close")
+
+        monkeypatch.setattr(submission, "ZKHAPIClient", lambda *args: ManagedClient())
+        client.post_meters.side_effect = post
+        manager = submission.MeterSubmission(SimpleNamespace(bus=SimpleNamespace(async_listen=MagicMock())))
+        coord = coordinator("first", {"42": account(meter("123")), "43": {"tariffs": {"gas": 1}}})
+
+        async def refresh():
+            calls.append("refresh")
+
+        coord.async_request_refresh.side_effect = refresh
+        manager.coordinators["first"] = coord
+        await manager.async_handle_event(SimpleNamespace(data={"account_id": "42", "meters": [{"serial_number": "123", "value": 1}]}))
+        assert calls == ["post", "close", "refresh"]
+        coord.async_request_refresh.assert_awaited_once()
+        client.get_active_meters.assert_awaited_once()
+        client.get_archived_meters.assert_not_awaited()
+        coord.async_set_updated_data.assert_not_called()
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("change", ["unload", "replace"])
+def test_refresh_is_not_requested_after_unload_or_reload(monkeypatch, change):
+    async def run():
+        client = Client("user", "password")
+        client.get_active_meters.return_value = account(meter("123"))["meters"]
+        manager = submission.MeterSubmission(SimpleNamespace(bus=SimpleNamespace(async_listen=MagicMock())))
+        coord = coordinator("first", {"42": account(meter("123"))})
+        manager.coordinators["first"] = coord
+
+        async def post(payload):
+            if change == "unload":
+                manager.coordinators.pop("first")
+            else:
+                manager.coordinators["first"] = coordinator("first", {"42": account(meter("123"))})
+
+        client.post_meters.side_effect = post
+        monkeypatch.setattr(submission, "ZKHAPIClient", lambda *args: client)
+        await manager.async_handle_event(SimpleNamespace(data={"account_id": "42", "meters": [{"serial_number": "123", "value": 1}]}))
+        client.post_meters.assert_awaited_once()
+        coord.async_request_refresh.assert_not_awaited()
+    asyncio.run(run())
+
+
+def test_failed_post_does_not_request_refresh(monkeypatch):
+    async def run():
+        client = Client("user", "password")
+        client.get_active_meters.return_value = account(meter("123"))["meters"]
+        client.post_meters.side_effect = ZKHAPIConnectionError("post failed")
+        monkeypatch.setattr(submission, "ZKHAPIClient", lambda *args: client)
+        manager = submission.MeterSubmission(SimpleNamespace(bus=SimpleNamespace(async_listen=MagicMock())))
+        coord = coordinator("first", {"42": account(meter("123"))})
+        manager.coordinators["first"] = coord
+        await manager.async_handle_event(SimpleNamespace(data={"account_id": "42", "meters": [{"serial_number": "123", "value": 1}]}))
+        client.post_meters.assert_awaited_once()
+        coord.async_request_refresh.assert_not_awaited()
+    asyncio.run(run())
+
+
+def test_refresh_failure_does_not_resubmit_readings(monkeypatch):
+    async def run():
+        client = Client("user", "password")
+        client.get_active_meters.return_value = account(meter("123"))["meters"]
+        monkeypatch.setattr(submission, "ZKHAPIClient", lambda *args: client)
+        manager = submission.MeterSubmission(SimpleNamespace(bus=SimpleNamespace(async_listen=MagicMock())))
+        coord = coordinator("first", {"42": account(meter("123"))})
+        coord.async_request_refresh.side_effect = RuntimeError("refresh failed")
+        manager.coordinators["first"] = coord
+        await manager.async_handle_event(SimpleNamespace(data={"account_id": "42", "meters": [{"serial_number": "123", "value": 1}]}))
+        client.post_meters.assert_awaited_once()
+        coord.async_request_refresh.assert_awaited_once()
+    asyncio.run(run())
+
+
+def test_submission_refreshes_real_coordinator_and_notifies_listeners(monkeypatch, tmp_path):
+    async def run():
+        hass = HomeAssistant(str(tmp_path))
+        entry = SimpleNamespace(entry_id="first", data={"username": "user", "password": "password"}, async_on_unload=MagicMock(), pref_disable_polling=True)
+        coord = ZKHDataUpdateCoordinator(hass, entry)
+        coord.data = {"accounts": {"42": account(meter("123"))}}
+        updated = {"accounts": {"42": {"meters": {"123": {"value": 8}}}, "43": {"tariffs": {"water": 5}}}}
+        coord._async_update_data = AsyncMock(return_value=updated)
+        notifications = []
+
+        @callback
+        def listener():
+            notifications.append(coord.data)
+
+        remove = coord.async_add_listener(listener)
+        client = Client("user", "password")
+        client.get_active_meters.return_value = account(meter("123"))["meters"]
+        monkeypatch.setattr(submission, "ZKHAPIClient", lambda *args: client)
+        manager = submission.MeterSubmission(hass)
+        manager.coordinators["first"] = coord
+        await manager.async_handle_event(SimpleNamespace(data={"account_id": "42", "meters": [{"serial_number": "123", "value": 8}]}))
+        client.post_meters.assert_awaited_once()
+        coord._async_update_data.assert_awaited_once()
+        assert coord.data == updated
+        assert notifications == [updated]
+        remove()
+        manager.unsubscribe()
+        await coord.async_shutdown()
     asyncio.run(run())
 
 
